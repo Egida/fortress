@@ -1,0 +1,9 @@
+target/
+admin/.next/
+admin/node_modules/
+logs/*.log
+data/*.db
+config/fortress.toml
+*.pem
+*.key
+.env*
