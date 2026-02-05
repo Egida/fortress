@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://readme-typing-svg.herokuapp.com?font=JetBrains+Mono&weight=700&size=24&duration=3000&pause=1000&color=00FF00&center=true&vCenter=true&width=200&lines=Tron" alt="Tron" />
+</p>
+
 # Fortress
 
 Enterprise-grade anti-DDoS reverse proxy. L3/L4/L7 koruma, real-time traffic analysis, otomatik tehdit tespiti.
