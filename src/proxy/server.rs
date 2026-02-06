@@ -20,7 +20,7 @@ use super::http_handler::HttpHandler;
 use super::tls::extract_ja3_from_client_hello;
 use super::websocket::WebSocketProxy;
 
-/
+/// The main Fortress proxy server.
 pub struct ProxyServer {
     settings: Arc<Settings>,
     tls_config: Arc<rustls::ServerConfig>,
@@ -52,15 +52,17 @@ impl ProxyServer {
         }
     }
 
-    /
+    /// Start the proxy server.
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         let https_addr = &self.settings.server.bind_https;
         let http_addr = &self.settings.server.bind_http;
 
+        // --- HTTPS listener ---
         let https_listener = bind_tcp_listener(https_addr)?;
         let https_listener = TcpListener::from_std(https_listener.into())?;
         info!(addr = %https_addr, "HTTPS listener started");
 
+        // --- HTTP listener ---
         let http_listener = bind_tcp_listener(http_addr)?;
         let http_listener = TcpListener::from_std(http_listener.into())?;
         info!(addr = %http_addr, "HTTP listener started (redirect-to-HTTPS)");
@@ -68,6 +70,7 @@ impl ProxyServer {
         let tls_acceptor = TlsAcceptor::from(Arc::clone(&self.tls_config));
         let max_connections = self.settings.server.max_connections;
 
+        // --- Stale-connection cleanup task ---
         let cleanup_connections = Arc::clone(&self.connections);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -77,8 +80,10 @@ impl ProxyServer {
             }
         });
 
+        // --- HTTP redirect task ---
         let _http_redirect_handle = tokio::spawn(run_http_redirect(http_listener));
 
+        // --- Main HTTPS accept loop ---
         info!("Fortress proxy is ready to accept connections");
 
         loop {
@@ -92,12 +97,14 @@ impl ProxyServer {
 
             let peer_ip = peer_addr.ip();
 
+            // Max connections check
             if self.connections.active_count() >= max_connections as u64 {
                 debug!(client_ip = %peer_ip, "Max connections reached, dropping");
                 drop(stream);
                 continue;
             }
 
+            // L4 protection check (pre-TLS)
             let l4_tracker_clone = self.l4_tracker.clone();
             let sqlite_clone = self.sqlite.clone();
             if let Some(ref l4) = l4_tracker_clone {
@@ -106,6 +113,7 @@ impl ProxyServer {
                         l4.register_connection(peer_ip);
                     }
                     L4Action::Drop => {
+                        // Log L4 event asynchronously
                         let ip_str = peer_ip.to_string();
                         let sqlite = sqlite_clone.clone();
                         let metrics = l4.get_metrics();
@@ -122,6 +130,7 @@ impl ProxyServer {
                         continue;
                     }
                     L4Action::Tarpit => {
+                        // Log L4 event asynchronously
                         let ip_str = peer_ip.to_string();
                         let sqlite = sqlite_clone.clone();
                         tokio::spawn(async move {
@@ -143,6 +152,7 @@ impl ProxyServer {
                 }
             }
 
+            // Track slowloris connections
             let slowloris = self.slowloris.clone();
             slowloris.track_connection(peer_ip);
 
@@ -152,14 +162,17 @@ impl ProxyServer {
             let slowloris_check = self.slowloris.clone();
 
             tokio::spawn(async move {
+                // Check for slowloris before TLS handshake timeout
                 let result =
                     handle_tls_connection(stream, acceptor, handler, connections, peer_ip).await;
 
+                // Unregister L4 connection when done
                 if let Some(ref l4) = l4_tracker_clone {
                     l4.unregister_connection(peer_ip);
                 }
 
                 if let Err(err) = result {
+                    // Check if this was a slowloris attempt
                     if slowloris_check.is_slowloris(&peer_ip) {
                         warn!(
                             client_ip = %peer_ip,
@@ -178,6 +191,9 @@ impl ProxyServer {
     }
 }
 
+// ---------------------------------------------------------------------------
+// TCP listener with SO_REUSEPORT / SO_REUSEADDR
+// ---------------------------------------------------------------------------
 
 fn bind_tcp_listener(addr: &str) -> Result<std::net::TcpListener, Box<dyn std::error::Error>> {
     let sock_addr: std::net::SocketAddr = addr.parse()?;
@@ -203,6 +219,9 @@ fn bind_tcp_listener(addr: &str) -> Result<std::net::TcpListener, Box<dyn std::e
     Ok(socket.into())
 }
 
+// ---------------------------------------------------------------------------
+// HTTPS connection handler
+// ---------------------------------------------------------------------------
 
 async fn handle_tls_connection(
     stream: TcpStream,
@@ -211,6 +230,7 @@ async fn handle_tls_connection(
     connections: Arc<ConnectionTracker>,
     peer_ip: IpAddr,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 1. Peek at the ClientHello for JA3.
     let mut peek_buf = [0u8; 1500];
     let peek_len = stream.peek(&mut peek_buf).await.unwrap_or(0);
     let ja3_hash = if peek_len > 0 {
@@ -223,13 +243,16 @@ async fn handle_tls_connection(
         debug!(client_ip = %peer_ip, ja3 = %hash, "JA3 fingerprint extracted");
     }
 
+    // 2. TLS handshake.
     let tls_stream = tls_acceptor.accept(stream).await.map_err(|err| {
         debug!(client_ip = %peer_ip, error = %err, "TLS handshake failed");
         err
     })?;
 
+    // Register the connection.
     let conn_id = connections.register(peer_ip, ja3_hash.clone());
 
+    // Wrap in a guard so the connection is always removed on drop.
     let _guard = ConnectionGuard {
         connections: Arc::clone(&connections),
         id: conn_id,
@@ -237,6 +260,7 @@ async fn handle_tls_connection(
 
     debug!(client_ip = %peer_ip, connection_id = conn_id, "TLS connection established");
 
+    // 3. Use hyper's HTTP/1 server connection to handle the stream properly.
     use hyper::server::conn::http1;
     use hyper::service::service_fn;
     use hyper_util::rt::TokioIo;
@@ -249,6 +273,7 @@ async fn handle_tls_connection(
         let h = Arc::clone(&handler);
         let j = ja3.clone();
         async move {
+            // Check for WebSocket upgrade before passing to handler.
             if WebSocketProxy::is_websocket_upgrade(&req) {
                 info!(
                     client_ip = %peer_ip,
@@ -278,6 +303,9 @@ async fn handle_tls_connection(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// HTTP -> HTTPS redirect server
+// ---------------------------------------------------------------------------
 
 async fn run_http_redirect(listener: TcpListener) {
     loop {
@@ -364,6 +392,9 @@ async fn run_http_redirect(listener: TcpListener) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Connection guard (RAII cleanup)
+// ---------------------------------------------------------------------------
 
 struct ConnectionGuard {
     connections: Arc<ConnectionTracker>,

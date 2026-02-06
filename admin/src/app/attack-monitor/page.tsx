@@ -314,12 +314,14 @@ export default function AttackMonitorPage() {
       setAutoBans(ab.bans || []);
       setTopIps(ips.top_ips || []);
 
+      // Keep last 120 seconds of chart data
       const histData = (hist.data || []).slice(-120);
       setChartData(histData);
 
       setConnected(true);
       setLastUpdate(new Date());
 
+      // Alert on new attack
       const isAttack = ts.distributed_attack_active || da.current_window?.attack_active;
       if (isAttack && !prevAttackRef.current && soundEnabled && audioRef.current) {
         audioRef.current.play().catch(() => {});

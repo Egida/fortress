@@ -12,8 +12,8 @@ use crate::config::settings::Settings;
 use crate::protection::escalation::EscalationEngine;
 use crate::storage::sqlite::{AttackRow, MetricsRow, SqliteStore};
 
-/
-/
+/// Periodic reporter that drives the collector tick and flushes aggregated
+/// metrics to the SQLite backing store.
 pub struct MetricsReporter {
     collector: Arc<MetricsCollector>,
     sqlite: Arc<SqliteStore>,
@@ -21,6 +21,7 @@ pub struct MetricsReporter {
     settings: Arc<Settings>,
     alerting: Option<Arc<AlertManager>>,
 
+    // Attack tracking state
     previous_level: Mutex<u8>,
     current_attack_id: Mutex<Option<i64>>,
     attack_peak_rps: Mutex<u64>,
@@ -49,7 +50,7 @@ impl MetricsReporter {
         }
     }
 
-    /
+    /// Run the reporter loop forever.
     pub async fn run(&self) {
         let mut tick_interval = interval(Duration::from_secs(1));
         tick_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -77,17 +78,19 @@ impl MetricsReporter {
         }
     }
 
-    /
+    /// Feed live traffic stats into the escalation engine and track attacks.
     fn evaluate_escalation(&self) {
         let current_rps = self.collector.get_current_rps();
         let snapshot = self.collector.get_snapshot();
 
+        // Run the escalation engine
         self.escalation.evaluate(current_rps, snapshot.total_blocked, snapshot.total_requests, &self.settings);
 
         let new_level = self.escalation.level_as_u8();
         let mut prev_level = self.previous_level.lock();
         let old_level = *prev_level;
 
+        // Track peak RPS during ongoing attack
         if self.current_attack_id.lock().is_some() {
             let mut peak = self.attack_peak_rps.lock();
             let rps = current_rps as u64;
@@ -99,15 +102,19 @@ impl MetricsReporter {
         if new_level != old_level {
             *prev_level = new_level;
 
+            // L0 -> L1+: attack started
             if old_level == 0 && new_level >= 1 {
                 self.record_attack_start(new_level, current_rps as u64);
             }
+            // L1+ -> L0: attack ended
             else if old_level >= 1 && new_level == 0 {
                 self.record_attack_end();
             }
+            // L1+ -> higher: update attack severity
             else if new_level > old_level {
                 self.update_attack_severity(new_level);
 
+                // Send alert on escalation
                 if let Some(ref alerting) = self.alerting {
                     let msg = format!(
                         "Protection level escalated: L{} -> L{} (RPS: {:.0})",
@@ -122,7 +129,7 @@ impl MetricsReporter {
         }
     }
 
-    /
+    /// Record the start of a new attack.
     fn record_attack_start(&self, level: u8, rps: u64) {
         let now = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let severity = Self::level_to_severity(level);
@@ -162,6 +169,7 @@ impl MetricsReporter {
             }
         }
 
+        // Send alert
         if let Some(ref alerting) = self.alerting {
             let msg = format!("Attack detected! Level: L{}, RPS: {}", level, rps);
             let alerting = alerting.clone();
@@ -171,7 +179,7 @@ impl MetricsReporter {
         }
     }
 
-    /
+    /// Record the end of an ongoing attack.
     fn record_attack_end(&self) {
         let mut attack_id = self.current_attack_id.lock();
         let id = match *attack_id {
@@ -216,6 +224,7 @@ impl MetricsReporter {
         *self.attack_peak_rps.lock() = 0;
         *self.attack_started_at.lock() = None;
 
+        // Send alert
         if let Some(ref alerting) = self.alerting {
             let msg = format!("Attack ended. Peak RPS: {}", peak);
             let alerting = alerting.clone();
@@ -225,7 +234,7 @@ impl MetricsReporter {
         }
     }
 
-    /
+    /// Update the severity of an ongoing attack when level increases.
     fn update_attack_severity(&self, new_level: u8) {
         let attack_id = self.current_attack_id.lock();
         let id = match *attack_id {
@@ -277,7 +286,7 @@ impl MetricsReporter {
         }
     }
 
-    /
+    /// Persist accumulated metrics to SQLite and reset hourly aggregates.
     fn flush_to_sqlite(&self) {
         info!("Flushing hourly metrics to SQLite");
 

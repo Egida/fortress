@@ -4,6 +4,9 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 
+// ---------------------------------------------------------------------------
+// Row structs
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockedIpRow {
@@ -104,16 +107,20 @@ pub struct L4EventRow {
     pub connection_rate: Option<i64>,
 }
 
+// ---------------------------------------------------------------------------
+// SqliteStore
+// ---------------------------------------------------------------------------
 
 pub struct SqliteStore {
     conn: Mutex<Connection>,
 }
 
 impl SqliteStore {
-    /
+    /// Open (or create) the database at `path` and run migrations.
     pub fn new(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
 
+        // Enable WAL mode for better concurrent-read performance.
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
 
         conn.execute_batch(
@@ -220,6 +227,7 @@ impl SqliteStore {
             ",
         )?;
 
+        // Migration: add always_challenge column to existing services table
         let _ = conn.execute_batch(
             "ALTER TABLE services ADD COLUMN always_challenge INTEGER NOT NULL DEFAULT 0;"
         );
@@ -229,6 +237,9 @@ impl SqliteStore {
         })
     }
 
+    // -----------------------------------------------------------------------
+    // Blocked IPs
+    // -----------------------------------------------------------------------
 
     pub fn add_blocked_ip(
         &self,
@@ -273,6 +284,9 @@ impl SqliteStore {
         rows.collect()
     }
 
+    // -----------------------------------------------------------------------
+    // Blocked ASNs
+    // -----------------------------------------------------------------------
 
     pub fn add_blocked_asn(
         &self,
@@ -313,6 +327,9 @@ impl SqliteStore {
         rows.collect()
     }
 
+    // -----------------------------------------------------------------------
+    // Blocked countries
+    // -----------------------------------------------------------------------
 
     pub fn add_blocked_country(
         &self,
@@ -355,6 +372,9 @@ impl SqliteStore {
         rows.collect()
     }
 
+    // -----------------------------------------------------------------------
+    // Protection rules
+    // -----------------------------------------------------------------------
 
     pub fn add_rule(
         &self,
@@ -418,6 +438,9 @@ impl SqliteStore {
         rows.collect()
     }
 
+    // -----------------------------------------------------------------------
+    // Metrics (hourly snapshots)
+    // -----------------------------------------------------------------------
 
     pub fn insert_metrics_hourly(&self, snapshot: &MetricsRow) -> Result<()> {
         let conn = self.conn.lock().expect("sqlite mutex poisoned");
@@ -476,6 +499,9 @@ impl SqliteStore {
         rows.collect()
     }
 
+    // -----------------------------------------------------------------------
+    // Attacks
+    // -----------------------------------------------------------------------
 
     pub fn insert_attack(&self, attack: &AttackRow) -> Result<i64> {
         let conn = self.conn.lock().expect("sqlite mutex poisoned");
@@ -555,6 +581,9 @@ impl SqliteStore {
         rows.collect()
     }
 
+    // -----------------------------------------------------------------------
+    // Key-value config
+    // -----------------------------------------------------------------------
 
     pub fn get_config(&self, key: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().expect("sqlite mutex poisoned");
@@ -578,6 +607,9 @@ impl SqliteStore {
         Ok(())
     }
 
+    // -----------------------------------------------------------------------
+    // Services
+    // -----------------------------------------------------------------------
 
     pub fn add_service(&self, svc: &ServiceRow) -> Result<()> {
         let conn = self.conn.lock().expect("sqlite mutex poisoned");
@@ -685,6 +717,9 @@ impl SqliteStore {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // L4 Events
+    // -----------------------------------------------------------------------
 
     pub fn insert_l4_event(
         &self,

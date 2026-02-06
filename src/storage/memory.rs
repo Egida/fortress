@@ -6,6 +6,10 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
+// ---------------------------------------------------------------------------
+// Rate-limit configuration (expected to be defined elsewhere; redeclared here
+// so the module is self-contained).
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimitConfig {
@@ -15,6 +19,9 @@ pub struct RateLimitConfig {
     pub country_per_second: u64,
 }
 
+// ---------------------------------------------------------------------------
+// SlidingWindow – per-key counter that only keeps data inside the window.
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct SlidingWindow {
@@ -33,6 +40,7 @@ impl SlidingWindow {
     pub fn increment(&mut self) {
         let now = Instant::now();
         if let Some(last) = self.counts.back_mut() {
+            // Coalesce increments that arrive within 1 ms of each other.
             if now.duration_since(last.0) < Duration::from_millis(1) {
                 last.1 += 1;
                 return;
@@ -63,11 +71,14 @@ impl SlidingWindow {
     }
 }
 
+// ---------------------------------------------------------------------------
+// BehaviorProfile
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct BehaviorProfile {
     pub request_intervals: VecDeque<Duration>,
-    pub paths_visited: HashSet<u64>,
+    pub paths_visited: HashSet<u64>, // hashed paths
     pub methods_used: HashMap<String, u32>,
     pub total_requests: u64,
     pub first_seen: Instant,
@@ -94,6 +105,9 @@ impl BehaviorProfile {
     }
 }
 
+// ---------------------------------------------------------------------------
+// BlockedEntry
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct BlockedEntry {
@@ -102,6 +116,9 @@ pub struct BlockedEntry {
     pub source: String,
 }
 
+// ---------------------------------------------------------------------------
+// Helper: map IPv4 to /24 represented as u32
+// ---------------------------------------------------------------------------
 
 pub fn ip_to_subnet(ip: IpAddr, mask_bits: u8) -> u32 {
     match ip {
@@ -115,11 +132,16 @@ pub fn ip_to_subnet(ip: IpAddr, mask_bits: u8) -> u32 {
             ip_u32 & mask
         }
         IpAddr::V6(_) => {
+            // For IPv6 we just return 0; real subnet handling for v6 would
+            // require larger key types.
             0
         }
     }
 }
 
+// ---------------------------------------------------------------------------
+// Simple non-crypto hash for path strings (FNV-1a 64-bit)
+// ---------------------------------------------------------------------------
 
 fn hash_path(path: &str) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -130,21 +152,30 @@ fn hash_path(path: &str) -> u64 {
     hash
 }
 
+// ---------------------------------------------------------------------------
+// MemoryStore
+// ---------------------------------------------------------------------------
 
 pub struct MemoryStore {
+    // Rate limiting
     ip_requests: DashMap<IpAddr, SlidingWindow>,
     subnet_requests: DashMap<u32, SlidingWindow>,
     asn_requests: DashMap<u32, SlidingWindow>,
     country_requests: DashMap<String, SlidingWindow>,
 
+    // Behavioral profiles
     behavior_profiles: DashMap<IpAddr, BehaviorProfile>,
 
+    // Blocked IPs (runtime cache from SQLite)
     blocked_ips: DashMap<IpAddr, BlockedEntry>,
 
-    clearances: DashMap<IpAddr, Instant>,
+    // Challenge clearances
+    clearances: DashMap<IpAddr, Instant>, // IP -> expiry
 
+    // Active connections
     active_connections: AtomicU64,
 
+    // Metrics counters
     total_requests: AtomicU64,
     passed_requests: AtomicU64,
     blocked_requests: AtomicU64,
@@ -169,8 +200,11 @@ impl MemoryStore {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Rate limiting
+    // -----------------------------------------------------------------------
 
-    /
+    /// Increment sliding-window counters for every dimension.
     pub fn record_request(&self, ip: IpAddr, subnet: u32, asn: u32, country: &str) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
 
@@ -195,7 +229,7 @@ impl MemoryStore {
             .increment();
     }
 
-    /
+    /// Returns `Some(reason)` if any rate limit is exceeded.
     pub fn check_rate_limit(
         &self,
         ip: IpAddr,
@@ -249,10 +283,14 @@ impl MemoryStore {
         None
     }
 
+    // -----------------------------------------------------------------------
+    // Block-list cache
+    // -----------------------------------------------------------------------
 
     pub fn is_blocked(&self, ip: &IpAddr) -> Option<BlockedEntry> {
         if let Some(entry) = self.blocked_ips.get(ip) {
             let e = entry.value();
+            // Check expiry
             if let Some(exp) = e.expires_at {
                 if Instant::now() >= exp {
                     drop(entry);
@@ -281,6 +319,9 @@ impl MemoryStore {
         self.blocked_ips.remove(ip);
     }
 
+    // -----------------------------------------------------------------------
+    // Challenge clearances
+    // -----------------------------------------------------------------------
 
     pub fn has_clearance(&self, ip: &IpAddr) -> bool {
         if let Some(entry) = self.clearances.get(ip) {
@@ -297,9 +338,12 @@ impl MemoryStore {
         self.clearances.insert(ip, Instant::now() + duration);
     }
 
+    // -----------------------------------------------------------------------
+    // Behavioral profiling
+    // -----------------------------------------------------------------------
 
-    /
-    /
+    /// Update the behavioral profile for `ip` and return a suspicion score
+    /// in the range `[0.0, 1.0]`.  Higher means more suspicious.
     pub fn update_behavior(
         &self,
         ip: IpAddr,
@@ -318,14 +362,17 @@ impl MemoryStore {
         profile.last_seen = now;
         profile.total_requests += 1;
 
+        // Record inter-request interval (keep last 100).
         if profile.request_intervals.len() >= 100 {
             profile.request_intervals.pop_front();
         }
         profile.request_intervals.push_back(interval);
 
+        // Record path and method
         profile.paths_visited.insert(hash_path(path));
         *profile.methods_used.entry(method.to_string()).or_insert(0) += 1;
 
+        // Check JA3 / UA consistency
         if let Some(j) = ja3 {
             match &profile.ja3_hash {
                 Some(prev) if prev != j => {
@@ -352,8 +399,11 @@ impl MemoryStore {
             }
         }
 
+        // --- Compute suspicion score ---
         let mut score: f64 = 0.0;
 
+        // 1. Request-interval regularity: very uniform intervals are suspicious
+        //    (bots often fire at fixed intervals).
         if profile.request_intervals.len() >= 5 {
             let intervals: Vec<f64> = profile
                 .request_intervals
@@ -367,7 +417,9 @@ impl MemoryStore {
                     .map(|v| (v - mean).powi(2))
                     .sum::<f64>()
                     / intervals.len() as f64;
-                let cv = variance.sqrt() / mean;
+                let cv = variance.sqrt() / mean; // coefficient of variation
+                // Very low CV => regular intervals => mildly suspicious
+                // (Reduced: monitoring systems and health checks are legitimate)
                 if cv < 0.05 {
                     score += 0.15;
                 } else if cv < 0.15 {
@@ -376,6 +428,7 @@ impl MemoryStore {
             }
         }
 
+        // 2. Very high request rate
         if profile.total_requests > 100 {
             let elapsed = now.duration_since(profile.first_seen).as_secs_f64();
             if elapsed > 0.0 {
@@ -388,10 +441,13 @@ impl MemoryStore {
             }
         }
 
+        // 3. Path diversity: very few distinct paths with many requests
+        // (Raised from 20 to 50 to avoid penalizing single-endpoint APIs)
         if profile.total_requests > 50 && profile.paths_visited.len() <= 2 {
             score += 0.10;
         }
 
+        // 4. Consistency violations
         if profile.consistency_violations > 0 {
             score += (profile.consistency_violations as f64 * 0.1).min(0.25);
         }
@@ -399,34 +455,45 @@ impl MemoryStore {
         score.min(1.0)
     }
 
+    // -----------------------------------------------------------------------
+    // Cleanup
+    // -----------------------------------------------------------------------
 
-    /
+    /// Remove expired entries from every map.
     pub fn cleanup(&self) {
         let now = Instant::now();
 
+        // Sliding windows
         self.ip_requests.iter_mut().for_each(|mut entry| entry.value_mut().cleanup());
         self.subnet_requests.iter_mut().for_each(|mut entry| entry.value_mut().cleanup());
         self.asn_requests.iter_mut().for_each(|mut entry| entry.value_mut().cleanup());
         self.country_requests.iter_mut().for_each(|mut entry| entry.value_mut().cleanup());
 
+        // Remove empty sliding windows
         self.ip_requests.retain(|_, v| !v.counts.is_empty());
         self.subnet_requests.retain(|_, v| !v.counts.is_empty());
         self.asn_requests.retain(|_, v| !v.counts.is_empty());
         self.country_requests.retain(|_, v| !v.counts.is_empty());
 
+        // Expired blocked IPs
         self.blocked_ips.retain(|_, v| {
             v.expires_at.map_or(true, |exp| now < exp)
         });
 
+        // Expired clearances
         self.clearances.retain(|_, exp| now < *exp);
 
+        // Stale behavior profiles (no activity in the last 10 minutes)
         let stale_cutoff = now - Duration::from_secs(600);
         self.behavior_profiles
             .retain(|_, v| v.last_seen >= stale_cutoff);
     }
 
+    // -----------------------------------------------------------------------
+    // Metrics
+    // -----------------------------------------------------------------------
 
-    /
+    /// Returns `(total, passed, blocked, challenged)`.
     pub fn get_metrics(&self) -> (u64, u64, u64, u64) {
         (
             self.total_requests.load(Ordering::Relaxed),
@@ -443,6 +510,9 @@ impl MemoryStore {
         self.challenged_requests.store(0, Ordering::Relaxed);
     }
 
+    // -----------------------------------------------------------------------
+    // Convenience counter helpers (used externally)
+    // -----------------------------------------------------------------------
 
     pub fn inc_passed(&self) {
         self.passed_requests.fetch_add(1, Ordering::Relaxed);

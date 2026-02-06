@@ -1,4 +1,9 @@
+// FORTRESS - Core Constants & Utility Functions
+// Classification: INTERNAL USE ONLY
 
+// ---------------------------------------------------------------------------
+// Protection Level Definitions (DEFCON-style threat posture)
+// ---------------------------------------------------------------------------
 
 export const PROTECTION_LEVELS: Record<string, {
   level: number;
@@ -76,6 +81,9 @@ export const PROTECTION_LEVELS: Record<string, {
 
 export const PROTECTION_LEVELS_LIST = Object.values(PROTECTION_LEVELS).sort((a, b) => a.level - b.level);
 
+// ---------------------------------------------------------------------------
+// Action Colors
+// ---------------------------------------------------------------------------
 
 export const ACTION_COLORS: Record<string, string> = {
   Pass: '#22c55e',
@@ -87,6 +95,9 @@ export const ACTION_COLORS: Record<string, string> = {
   Drop: '#dc2626',
 };
 
+// ---------------------------------------------------------------------------
+// Threat Categories
+// ---------------------------------------------------------------------------
 
 export const THREAT_CATEGORIES: Record<string, {
   id: string;
@@ -153,6 +164,9 @@ export const THREAT_CATEGORIES: Record<string, {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Attack Vectors
+// ---------------------------------------------------------------------------
 
 export const ATTACK_VECTORS: readonly string[] = [
   'HTTP GET Flood',
@@ -185,6 +199,9 @@ export const ATTACK_VECTORS: readonly string[] = [
   'Distributed Slow Read',
 ] as const;
 
+// ---------------------------------------------------------------------------
+// Response Actions
+// ---------------------------------------------------------------------------
 
 export const RESPONSE_ACTIONS: Record<string, {
   id: string;
@@ -265,6 +282,9 @@ export const RESPONSE_ACTIONS: Record<string, {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Utility Functions
+// ---------------------------------------------------------------------------
 
 export function formatUptime(secs: number): string {
   const d = Math.floor(secs / 86400);

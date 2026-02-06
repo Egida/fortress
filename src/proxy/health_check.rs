@@ -6,11 +6,11 @@ use tracing::{debug, info, warn};
 
 use crate::proxy::service_router::ServiceRouter;
 
-/
+/// Periodic TCP health checker for upstream backends.
 ///
-/
-/
-/
+/// Every `interval` seconds, attempts a TCP connection to each registered
+/// service's upstream address. If the connection fails, the service is
+/// marked unhealthy and requests will receive a 503.
 pub struct HealthChecker {
     service_router: Arc<ServiceRouter>,
     interval: Duration,
@@ -26,7 +26,7 @@ impl HealthChecker {
         }
     }
 
-    /
+    /// Run the health check loop forever.
     pub async fn run(&self) {
         let mut interval = tokio::time::interval(self.interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -37,7 +37,7 @@ impl HealthChecker {
         }
     }
 
-    /
+    /// Check all registered services.
     async fn check_all(&self) {
         let services = self.service_router.list_services();
 

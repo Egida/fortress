@@ -25,8 +25,8 @@ use super::asn::AsnClassifier;
 use super::bot_whitelist::BotWhitelist;
 use super::rate_limiter::RateLimiter;
 
-/
-/
+/// The main protection pipeline that chains all detection layers together.
+/// Each layer can short-circuit the pipeline with a Block or Challenge action.
 pub struct ProtectionPipeline {
     pub rate_limiter: Arc<RateLimiter>,
     pub geoip: Arc<GeoIpLookup>,
@@ -47,7 +47,7 @@ pub struct ProtectionPipeline {
     pub custom_rules: Arc<CustomRulesEngine>,
 }
 
-/
+/// Result of running a request through the full protection pipeline.
 pub struct PipelineResult {
     pub action: ThreatAction,
     pub reason: Option<ThreatReason>,
@@ -85,46 +85,58 @@ impl PipelineResult {
 }
 
 impl ProtectionPipeline {
-    /
+    /// Process a request through all protection layers in order.
     ///
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
-    /
+    /// Layer order:
+    /// 0.0  IP/Subnet whitelist (bypass all checks)
+    /// 1.0  Blocklist check (IP, ASN, country)
+    /// 1.5  Auto-Ban check
+    /// 1.6  Custom rules
+    /// 1.8  Managed rules (pre-built security rules)
+    /// 2.0  GeoIP lookup + country score
+    /// 2.05 Static asset bypass
+    /// 2.1  Bot whitelist
+    /// 2.2  IP Reputation scoring
+    /// 2.5  Sliding windows feed
+    /// 3.0  Rate limiting (challenge at L0-L2, block at L3-L4)
+    /// 3.2  Distributed attack detection
+    /// 3.5  ASN reputation
+    /// 4.0  Fingerprint (JA3)
+    /// 5.0  Header analysis
+    /// 6.0  Mobile proxy detection
+    /// 7.0  Behavioral scoring
+    /// 8.0  Challenge gate (escalation-aware)
+    /// 9.0  Clearance cookie check
     pub fn process(&self, ctx: &mut RequestContext, settings: &Settings, service: Option<&ServiceConfig>) -> PipelineResult {
         let mut cumulative_score: f64 = 0.0;
 
+        // ----------------------------------------------------------------
+        // Layer 0.0: IP/Subnet whitelist - bypass all protection
+        // ----------------------------------------------------------------
         if Self::is_whitelisted(&ctx.client_ip, settings) {
             debug!(ip = %ctx.client_ip, "Whitelisted IP/subnet - bypassing pipeline");
             return PipelineResult::allow();
         }
 
+        // ----------------------------------------------------------------
+        // Layer 1.0: Blocklist check (IP, ASN, country)
+        // ----------------------------------------------------------------
         if self.blocklist.check_ip(&ctx.client_ip).is_some() {
             info!(ip = %ctx.client_ip, "Blocked by IP blocklist");
             return PipelineResult::block(ThreatReason::BlockedIp, 100.0);
         }
 
+        // ----------------------------------------------------------------
+        // Layer 1.5: Auto-Ban check
+        // ----------------------------------------------------------------
         if let Some(reason) = self.auto_ban.is_banned(&ctx.client_ip) {
             debug!(ip = %ctx.client_ip, reason = %reason, "Blocked by auto-ban");
             return PipelineResult::block(ThreatReason::AutoBanned, 100.0);
         }
 
+        // ----------------------------------------------------------------
+        // Layer 1.6: Custom rules (user-defined rules from admin panel)
+        // ----------------------------------------------------------------
         if let Some((action, reason_str)) = self.custom_rules.check(ctx) {
             match action {
                 ThreatAction::Pass => {
@@ -151,6 +163,9 @@ impl ProtectionPipeline {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 1.8: Managed rules (pre-built security rules)
+        // ----------------------------------------------------------------
         if let Some(rule_result) = self.managed_rules.check(ctx) {
             match rule_result.action {
                 RuleAction::Block => {
@@ -163,6 +178,7 @@ impl ProtectionPipeline {
                     return PipelineResult::block(ThreatReason::ManagedRule, 100.0);
                 }
                 RuleAction::Challenge => {
+                    // Add high score to trigger challenge later
                     cumulative_score += 80.0;
                     debug!(
                         ip = %ctx.client_ip,
@@ -182,12 +198,18 @@ impl ProtectionPipeline {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 2.0: GeoIP lookup - populate context fields
+        // ----------------------------------------------------------------
+        // Only do GeoIP lookup if country_code isn't already set (e.g. from CF-IPCountry header)
         if ctx.country_code.is_none() {
             if let Some(country) = self.geoip.lookup_country(ctx.client_ip) {
                 ctx.country_code = Some(country.clone());
             }
         }
+        // Use whatever country we have now (from CF-IPCountry or GeoIP)
         if let Some(ref country) = ctx.country_code {
+            // Check country blocklist after we know the country
             if let Some((action, _reason)) = self.blocklist.check_country(country) {
                 match action {
                     crate::storage::blocklist::ThreatAction::Block => {
@@ -195,6 +217,7 @@ impl ProtectionPipeline {
                         return PipelineResult::block(ThreatReason::BlockedCountry, 100.0);
                     }
                     crate::storage::blocklist::ThreatAction::Challenge => {
+                        // Score modifier instead of immediate challenge
                         cumulative_score += settings.blocklist.country_challenge_score;
                         debug!(ip = %ctx.client_ip, country = %country,
                                score = settings.blocklist.country_challenge_score,
@@ -208,12 +231,16 @@ impl ProtectionPipeline {
             ctx.asn = Some(asn_number);
             ctx.asn_name = Some(asn_name);
 
+            // Check ASN blocklist after we know the ASN
             if self.blocklist.check_asn(asn_number).is_some() {
                 info!(ip = %ctx.client_ip, asn = asn_number, "Blocked by ASN blocklist");
                 return PipelineResult::block(ThreatReason::BlockedAsn, 100.0);
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 2.05: Static asset bypass
+        // ----------------------------------------------------------------
         {
             let p = ctx.path.as_str();
             let is_static = p.starts_with("/_next/")
@@ -246,6 +273,9 @@ impl ProtectionPipeline {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 2.1: Bot whitelist check
+        // ----------------------------------------------------------------
         if let Some(bot_name) = self.bot_whitelist.check(
             ctx.user_agent.as_deref(),
             &ctx.client_ip,
@@ -254,6 +284,9 @@ impl ProtectionPipeline {
             return PipelineResult::allow();
         }
 
+        // ----------------------------------------------------------------
+        // Layer 2.2: IP Reputation scoring
+        // ----------------------------------------------------------------
         {
             let (rep_score, should_block) = self.ip_reputation.check(&ctx.client_ip);
             if should_block {
@@ -266,6 +299,9 @@ impl ProtectionPipeline {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 2.5: Feed sliding windows for rate limiting
+        // ----------------------------------------------------------------
         let protection_level = match service.and_then(|s| s.protection_level_override) {
             Some(0) => ProtectionLevel::L0,
             Some(1) => ProtectionLevel::L1,
@@ -280,6 +316,11 @@ impl ProtectionPipeline {
 
         self.memory.record_request(ctx.client_ip, subnet, asn, country);
 
+        // ----------------------------------------------------------------
+        // Layer 3.0: Rate limiting
+        // At L0-L2: add high score to trigger challenge (graceful)
+        // At L3-L4: hard block (emergency mode)
+        // ----------------------------------------------------------------
         if let Some(reason) = self.rate_limiter.check(
             ctx.client_ip,
             subnet,
@@ -294,12 +335,16 @@ impl ProtectionPipeline {
                     return PipelineResult::block(reason, 90.0);
                 }
                 _ => {
+                    // At normal levels, add high score to trigger challenge instead of hard block
                     cumulative_score += 90.0;
                     info!(ip = %ctx.client_ip, reason = ?reason, "Rate limit exceeded (challenge mode)");
                 }
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 3.2: Distributed attack detection
+        // ----------------------------------------------------------------
         {
             let dist_result = self.distributed.check(
                 ctx.client_ip,
@@ -317,6 +362,9 @@ impl ProtectionPipeline {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 3.5: ASN reputation scoring
+        // ----------------------------------------------------------------
         if let Some(asn_num) = ctx.asn {
             let asn_score = self.asn_classifier.suspicion_score(asn_num, &settings.asn_scoring);
             if asn_score > 0.0 {
@@ -325,6 +373,10 @@ impl ProtectionPipeline {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 4.0: Fingerprint analysis (JA3 vs UA consistency)
+        // ----------------------------------------------------------------
+        // Skip JA3 fingerprinting for Cloudflare-proxied requests (JA3 would be CF's, not the client's)
         if !ctx.is_behind_cloudflare {
             let (fp_score, fp_reason) = self.fingerprint.analyze(
                 ctx.ja3_hash.as_deref(),
@@ -341,6 +393,9 @@ impl ProtectionPipeline {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 5.0: Header analysis
+        // ----------------------------------------------------------------
         let (header_score, header_reason) = self.header_analysis.analyze(ctx);
         cumulative_score += header_score;
 
@@ -352,6 +407,9 @@ impl ProtectionPipeline {
             debug!(ip = %ctx.client_ip, score = header_score, reason = ?reason, "Header anomaly detected");
         }
 
+        // ----------------------------------------------------------------
+        // Layer 6.0: Mobile proxy detection
+        // ----------------------------------------------------------------
         let (mobile_score, is_mobile_proxy) = self.mobile_proxy.detect(ctx);
         cumulative_score += mobile_score;
 
@@ -362,8 +420,11 @@ impl ProtectionPipeline {
             }
         }
 
+        // ----------------------------------------------------------------
+        // Layer 7.0: Behavioral scoring
+        // ----------------------------------------------------------------
         let behavioral_score = self.behavioral.analyze(ctx);
-        cumulative_score += behavioral_score * 0.5;
+        cumulative_score += behavioral_score * 0.5; // Scale behavioral contribution
 
         debug!(
             ip = %ctx.client_ip,
@@ -372,11 +433,18 @@ impl ProtectionPipeline {
             "Behavioral analysis complete"
         );
 
+        // ----------------------------------------------------------------
+        // Layer 8.0: Escalation-aware challenge gate
+        // ----------------------------------------------------------------
         let force_challenge = service.map(|s| s.always_challenge).unwrap_or(false);
         if force_challenge || self.challenge.should_challenge(ctx, &protection_level, cumulative_score) {
+            // Before issuing a challenge, check if the path is exempt
             if self.challenge.is_exempt_path(&ctx.path) {
                 debug!(ip = %ctx.client_ip, path = %ctx.path, "Path exempt from challenge");
             } else {
+                // --------------------------------------------------------
+                // Layer 9.0: Check for valid clearance cookie
+                // --------------------------------------------------------
                 let cookies = ctx.headers.get("cookie").map(|s| s.as_str());
                 if self.challenge.has_valid_clearance(&ctx.client_ip, cookies) {
                     debug!(ip = %ctx.client_ip, "Valid clearance cookie found, allowing");
@@ -403,6 +471,7 @@ impl ProtectionPipeline {
             }
         }
 
+        // All layers passed - allow the request
         PipelineResult {
             action: ThreatAction::Pass,
             reason: None,
@@ -411,16 +480,18 @@ impl ProtectionPipeline {
         }
     }
 
-    /
+    /// Check if the client IP matches any whitelisted IP or subnet.
     fn is_whitelisted(ip: &IpAddr, settings: &Settings) -> bool {
         let ip_str = ip.to_string();
 
+        // Exact IP match
         for whitelisted in &settings.protection.whitelisted_ips {
             if ip_str == *whitelisted {
                 return true;
             }
         }
 
+        // Subnet match (supports /24 for IPv4)
         if let IpAddr::V4(v4) = ip {
             let octets = v4.octets();
             for subnet_str in &settings.protection.whitelisted_subnets {

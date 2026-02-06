@@ -13,8 +13,8 @@ use tokio::time::interval;
 
 use crate::admin_api::routes::AppState;
 
-/
-/
+/// Axum handler that upgrades the HTTP connection to a WebSocket for
+/// live traffic streaming.
 pub async fn live_traffic_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -22,17 +22,19 @@ pub async fn live_traffic_handler(
     ws.on_upgrade(|socket| handle_live_traffic(socket, state))
 }
 
-/
+/// Continuously push live traffic events to the connected WebSocket client.
 ///
-/
-/
-/
+/// Every 100 ms, the latest per-second snapshot is serialised as a JSON
+/// object and sent as a text frame.  The loop terminates when the client
+/// disconnects (the send fails or a Close frame is received).
 async fn handle_live_traffic(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
 
+    // Spawn a task that watches for client-initiated close.
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let recv_task = tokio::spawn(async move {
+        // Drain incoming frames; we only care about Close.
         while let Some(Ok(msg)) = receiver.next().await {
             if matches!(msg, Message::Close(_)) {
                 break;
@@ -70,15 +72,18 @@ async fn handle_live_traffic(socket: WebSocket, state: AppState) {
 
                 let text = serde_json::to_string(&payload).unwrap_or_default();
                 if sender.send(Message::Text(text.into())).await.is_err() {
+                    // Client disconnected.
                     break;
                 }
             }
 
             _ = &mut shutdown_rx => {
+                // Client sent a close frame.
                 break;
             }
         }
     }
 
+    // Clean up the receiver task.
     recv_task.abort();
 }

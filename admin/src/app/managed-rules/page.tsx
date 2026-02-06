@@ -16,6 +16,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 
+// --------------- Types ---------------
 
 interface ManagedRule {
   id: number;
@@ -24,6 +25,7 @@ interface ManagedRule {
   enabled: boolean;
 }
 
+// --------------- Constants ---------------
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Shield,
@@ -91,6 +93,7 @@ const ACTION_LABELS: Record<string, string> = {
   score: "Score",
 };
 
+// --------------- Helpers ---------------
 
 function formatRuleName(name: string): string {
   return name
@@ -102,6 +105,7 @@ function getRuleAction(id: number): string {
   return RULE_ACTIONS[id] ?? "block";
 }
 
+// --------------- Component ---------------
 
 export default function ManagedRulesPage() {
   const [rules, setRules] = useState<ManagedRule[]>([]);
@@ -111,6 +115,7 @@ export default function ManagedRulesPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [bulkLoading, setBulkLoading] = useState(false);
 
+  // --------------- Data fetching ---------------
 
   const loadRules = useCallback(async () => {
     try {
@@ -129,12 +134,14 @@ export default function ManagedRulesPage() {
     loadRules();
   }, [loadRules]);
 
+  // --------------- Toast ---------------
 
   const showToast = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(null), 2000);
   };
 
+  // --------------- Toggle single rule ---------------
 
   const toggleRule = async (id: number, currentEnabled: boolean) => {
     setTogglingIds((prev) => new Set(prev).add(id));
@@ -159,6 +166,7 @@ export default function ManagedRulesPage() {
     }
   };
 
+  // --------------- Bulk toggle ---------------
 
   const bulkToggle = async (enabled: boolean) => {
     setBulkLoading(true);
@@ -183,6 +191,7 @@ export default function ManagedRulesPage() {
     }
   };
 
+  // --------------- Derived data ---------------
 
   const enabledCount = rules.filter((r) => r.enabled).length;
   const blockCount = rules.filter(
@@ -207,6 +216,7 @@ export default function ManagedRulesPage() {
 
   const filteredRuleIds = new Set(filteredRules.map((r) => r.id));
 
+  // --------------- Loading skeleton ---------------
 
   if (loading) {
     return (
@@ -252,6 +262,7 @@ export default function ManagedRulesPage() {
     );
   }
 
+  // --------------- Main render ---------------
 
   return (
     <div className="min-h-screen bg-black text-zinc-100 p-6 space-y-6">

@@ -3,10 +3,10 @@ use std::time::Duration;
 
 use tracing::{error, info, warn};
 
-/
+/// Simple webhook-based alerting system.
 ///
-/
-/
+/// Sends JSON POST requests to a configured webhook URL when significant
+/// events occur (attack start, attack end, escalation changes).
 pub struct AlertManager {
     webhook_url: Option<String>,
     enabled: bool,
@@ -20,7 +20,7 @@ impl AlertManager {
         }
     }
 
-    /
+    /// Send an alert to the configured webhook.
     pub async fn send_alert(&self, event_type: &str, message: &str) {
         if !self.enabled {
             return;
@@ -43,6 +43,7 @@ impl AlertManager {
 
         let body = payload.to_string();
 
+        // Use a simple hyper client to POST the alert
         use hyper_util::client::legacy::Client;
         use hyper_util::client::legacy::connect::HttpConnector;
         use hyper_util::rt::TokioExecutor;

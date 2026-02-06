@@ -6,6 +6,9 @@ use super::settings::{
     UpstreamConfig,
 };
 
+// ---------------------------------------------------------------------------
+// Top-level struct defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_server_config() -> ServerConfig {
     ServerConfig {
@@ -119,6 +122,9 @@ pub fn default_storage_config() -> StorageConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ServerConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_bind_http() -> String {
     "0.0.0.0:80".to_string()
@@ -148,6 +154,9 @@ pub fn default_keepalive_timeout_secs() -> u64 {
     5
 }
 
+// ---------------------------------------------------------------------------
+// TlsConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_cert_dir() -> String {
     "/etc/letsencrypt/live".to_string()
@@ -157,6 +166,9 @@ pub fn default_tls_min_version() -> String {
     "1.2".to_string()
 }
 
+// ---------------------------------------------------------------------------
+// UpstreamConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_upstream_address() -> String {
     "127.0.0.1:8080".to_string()
@@ -174,6 +186,9 @@ pub fn default_response_timeout_ms() -> u64 {
     60_000
 }
 
+// ---------------------------------------------------------------------------
+// AdminApiConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_admin_bind() -> String {
     "127.0.0.1:9090".to_string()
@@ -183,6 +198,9 @@ pub fn default_api_key() -> String {
     String::new()
 }
 
+// ---------------------------------------------------------------------------
+// GeoipConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_city_db() -> String {
     "/opt/fortress/data/GeoLite2-City.mmdb".to_string()
@@ -192,6 +210,9 @@ pub fn default_asn_db() -> String {
     "/opt/fortress/data/GeoLite2-ASN.mmdb".to_string()
 }
 
+// ---------------------------------------------------------------------------
+// ProtectionConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_auto_escalation() -> bool {
     true
@@ -258,6 +279,9 @@ pub fn default_country_per_10s() -> u64 {
     10_000
 }
 
+// ---------------------------------------------------------------------------
+// ChallengeConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_pow_difficulty_l1() -> u8 {
     16
@@ -283,6 +307,9 @@ pub fn default_hmac_secret() -> String {
     String::new()
 }
 
+// ---------------------------------------------------------------------------
+// BehavioralConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_scoring_window_secs() -> u64 {
     60
@@ -292,6 +319,9 @@ pub fn default_max_profiles() -> usize {
     1_000_000
 }
 
+// ---------------------------------------------------------------------------
+// EscalationConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_check_interval_secs() -> u64 {
     5
@@ -317,6 +347,9 @@ pub fn default_l3_to_l4_rps() -> u64 {
     100_000
 }
 
+// ---------------------------------------------------------------------------
+// LoggingConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_log_level() -> String {
     "info".to_string()
@@ -330,11 +363,17 @@ pub fn default_access_log() -> String {
     "/var/log/fortress/access.log".to_string()
 }
 
+// ---------------------------------------------------------------------------
+// StorageConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_sqlite_path() -> String {
     "/opt/fortress/data/fortress.db".to_string()
 }
 
+// ---------------------------------------------------------------------------
+// L4ProtectionConfig field defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_l4_protection_config() -> L4ProtectionConfig {
     L4ProtectionConfig {
@@ -354,6 +393,9 @@ pub fn default_max_concurrent() -> u64 { 100 }
 pub fn default_tarpit_enabled() -> bool { true }
 pub fn default_tarpit_delay() -> u64 { 5000 }
 
+// ---------------------------------------------------------------------------
+// AlertingConfig defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_alerting_config() -> AlertingConfig {
     AlertingConfig {
@@ -362,6 +404,9 @@ pub fn default_alerting_config() -> AlertingConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// BotWhitelistConfig defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_bot_whitelist_config() -> BotWhitelistConfig {
     BotWhitelistConfig {
@@ -373,6 +418,9 @@ pub fn default_bot_whitelist_config() -> BotWhitelistConfig {
 pub fn default_bot_whitelist_enabled() -> bool { true }
 pub fn default_bot_verify_ip() -> bool { true }
 
+// ---------------------------------------------------------------------------
+// MobileProxyConfig defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_mobile_proxy_config() -> MobileProxyConfig {
     MobileProxyConfig {
@@ -384,6 +432,9 @@ pub fn default_mobile_proxy_config() -> MobileProxyConfig {
 pub fn default_mobile_proxy_min_signals() -> u32 { 3 }
 pub fn default_mobile_proxy_score_threshold() -> f64 { 80.0 }
 
+// ---------------------------------------------------------------------------
+// AsnScoringConfig defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_asn_scoring_config() -> AsnScoringConfig {
     AsnScoringConfig {
@@ -397,6 +448,9 @@ pub fn default_datacenter_score() -> f64 { 5.0 }
 pub fn default_vpn_score() -> f64 { 5.0 }
 pub fn default_residential_proxy_score() -> f64 { 25.0 }
 
+// ---------------------------------------------------------------------------
+// New field defaults (added to existing structs)
+// ---------------------------------------------------------------------------
 
 pub fn default_country_challenge_score() -> f64 { 20.0 }
 pub fn default_regularity_weight() -> f64 { 0.5 }
@@ -405,6 +459,9 @@ pub fn default_sustained_checks_required() -> u8 { 3 }
 pub fn default_block_ratio_threshold() -> f64 { 0.3 }
 pub fn default_ipv4_subnet_mask() -> u8 { 24 }
 
+// ---------------------------------------------------------------------------
+// IpReputationConfig defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_ip_reputation_config() -> IpReputationConfig {
     IpReputationConfig {
@@ -426,6 +483,9 @@ pub fn default_decay_percent() -> f64 { 10.0 }
 pub fn default_reputation_block_threshold() -> f64 { 80.0 }
 pub fn default_high_reputation_score() -> f64 { 20.0 }
 
+// ---------------------------------------------------------------------------
+// AutoBanConfig defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_auto_ban_config() -> AutoBanConfig {
     AutoBanConfig {
@@ -445,6 +505,9 @@ pub fn default_ban_threshold_1h() -> u32 { 50 }
 pub fn default_repeat_ban_threshold() -> u32 { 3 }
 pub fn default_subnet_ban_ratio() -> f64 { 0.3 }
 
+// ---------------------------------------------------------------------------
+// CloudflareConfig defaults
+// ---------------------------------------------------------------------------
 
 pub fn default_cloudflare_config() -> CloudflareConfig {
     CloudflareConfig {
@@ -452,8 +515,11 @@ pub fn default_cloudflare_config() -> CloudflareConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-/
+/// Return the number of logical CPUs, falling back to 4 if detection fails.
 fn num_cpus() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())

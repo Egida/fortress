@@ -3,14 +3,14 @@ use tracing::debug;
 
 use crate::models::threat::ThreatReason;
 
-/
+/// JA3 TLS fingerprint analyzer.
 ///
-/
-/
-/
-/
+/// Only flags connections whose JA3 matches a known attack tool.
+/// Unknown JA3 hashes are treated as neutral — not matching a known
+/// browser fingerprint is NOT evidence of malicious intent, since
+/// browser JA3 hashes change with every version update.
 pub struct FingerprintAnalyzer {
-    /
+    /// JA3 hash -> tool name (e.g., "wrk", "slowhttptest")
     known_bot_ja3: DashMap<String, String>,
 }
 
@@ -33,8 +33,10 @@ impl FingerprintAnalyzer {
             _ => return (0.0, None),
         };
 
+        // Check if JA3 matches a known bot/attack tool
         if let Some(tool_name) = self.known_bot_ja3.get(ja3_hash) {
             let name = tool_name.value().as_str();
+            // Bot frameworks get a lower score than attack tools
             let score = match name {
                 "scrapy" | "python-urllib" | "go-http-default" | "java-http-default"
                 | "libwww-perl" | "ruby-net-http" | "php-curl-default" => 50.0,
@@ -52,16 +54,18 @@ impl FingerprintAnalyzer {
         (0.0, None)
     }
 
-    /
+    /// Populate the known attack tool fingerprint database.
     ///
-    /
-    /
-    /
+    /// Contains JA3 hashes for known attack tools, DDoS tools, and bot
+    /// frameworks. These hashes are stable because attack tools rarely
+    /// update their TLS stacks.
     fn populate_known_fingerprints(&self) {
+        // ── Original entries ──────────────────────────────────────────
         self.known_bot_ja3.insert("ac12bfa41cbedb29f06c412c81a0a2f9".into(), "wrk".into());
         self.known_bot_ja3.insert("9e10692f1b7f78228b2d4e424db3a98c".into(), "slowhttptest".into());
         self.known_bot_ja3.insert("3b5074b1b5d032e5620f69f9f700ff0e".into(), "hping3".into());
 
+        // ── Vulnerability scanners (+70) ─────────────────────────────
         self.known_bot_ja3.insert("e7d705a3286e19ea42f587b344ee6865".into(), "nikto".into());
         self.known_bot_ja3.insert("2d16a9b213d5e23e06625aa875f5b025".into(), "sqlmap".into());
         self.known_bot_ja3.insert("b6b8a4b48c2e3e9c95e87536f6e3f6a6".into(), "nmap".into());
@@ -82,6 +86,7 @@ impl FingerprintAnalyzer {
         self.known_bot_ja3.insert("1a1be2ea6f5e7b8c1d9e0f3a4b5c6d7e".into(), "wpscan".into());
         self.known_bot_ja3.insert("8a2b3c4d5e6f7081a2b3c4d5e6f70819".into(), "nessus".into());
 
+        // ── DDoS tools (+70) ─────────────────────────────────────────
         self.known_bot_ja3.insert("e35c7b2e5a6d4f8b0c9d2e1f3a4b5c6d".into(), "goldeneye".into());
         self.known_bot_ja3.insert("d4e5f6071829a3b4c5d6e7f80192a3b4".into(), "hulk".into());
         self.known_bot_ja3.insert("f8e7d6c5b4a39281f0e9d8c7b6a59483".into(), "slowloris-tool".into());
@@ -93,6 +98,7 @@ impl FingerprintAnalyzer {
         self.known_bot_ja3.insert("5e6f70819a2b3c4d5e6f708192a3b4c5".into(), "xerxes".into());
         self.known_bot_ja3.insert("70819a2b3c4d5e6f708192a3b4c5d6e7".into(), "loic".into());
 
+        // ── Scraping / bot frameworks (+50) ──────────────────────────
         self.known_bot_ja3.insert("2ad2b325a2c47a3369bc0ec7d0a59740".into(), "scrapy".into());
         self.known_bot_ja3.insert("4817a6e8f4a6c2fb5d0d2e3e1f0a5b4c".into(), "python-urllib".into());
         self.known_bot_ja3.insert("bd0bf25947d4a37404f0424edf4db9ad".into(), "go-http-default".into());

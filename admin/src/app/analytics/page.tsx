@@ -242,9 +242,10 @@ export default function ThreatAnalyticsPage() {
       const data = await fortressGet<AnalyticsData>('/api/fortress/analytics');
       setAnalytics(data);
       setError(null);
+      // Store history for time range filtering
       setHistory((prev) => {
         const entry: HistoryEntry = { timestamp: Date.now(), data };
-        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000; // keep 7 days max
         return [...prev.filter((h) => h.timestamp > cutoff), entry];
       });
     } catch {
@@ -262,6 +263,7 @@ export default function ThreatAnalyticsPage() {
     };
   }, [fetchAnalytics]);
 
+  // Aggregate history entries within the selected time range
   const filteredAnalytics = useMemo(() => {
     if (!analytics) return null;
 
@@ -278,6 +280,8 @@ export default function ThreatAnalyticsPage() {
 
     if (inRange.length === 0) return analytics;
 
+    // Use the latest snapshot for live data (top_ips, etc.)
+    // but aggregate totals from history
     const latest = inRange[inRange.length - 1].data;
     return latest;
   }, [analytics, timeRange, history]);

@@ -3,20 +3,20 @@ use hyper::Request;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
 
-/
+/// WebSocket upgrade detection and raw TCP proxying.
 ///
-/
-/
-/
-/
+/// Once a WebSocket handshake is detected the proxy forwards the initial
+/// upgrade request to the upstream backend and then performs a bidirectional
+/// byte-level copy for the lifetime of the connection.  No WebSocket frame
+/// parsing takes place -- the proxy is completely transparent.
 pub struct WebSocketProxy;
 
 impl WebSocketProxy {
-    /
+    /// Check whether the given HTTP request is a WebSocket upgrade.
     ///
-    /
-    /
-    /
+    /// A request is treated as a WebSocket upgrade when it carries both:
+    /// - `Connection: Upgrade`
+    /// - `Upgrade: websocket`
     pub fn is_websocket_upgrade(req: &Request<Incoming>) -> bool {
         let has_upgrade_header = req
             .headers()
@@ -38,19 +38,19 @@ impl WebSocketProxy {
         has_upgrade_header && has_connection_upgrade
     }
 
-    /
-    /
-    /
+    /// Proxy a WebSocket connection by forwarding the initial upgrade request
+    /// bytes and then performing bidirectional I/O between the client and
+    /// upstream streams.
     ///
-    /
+    /// # Arguments
     ///
-    /
-    /
-    /
-    /
-    /
-    /
-    /
+    /// * `client_stream` -- the raw TCP (or already-decrypted TLS) stream
+    ///   from the connecting client.  The initial HTTP request bytes should
+    ///   **not** have been consumed from this stream yet; instead they are
+    ///   passed separately via `req_bytes`.
+    /// * `upstream_addr` -- the `host:port` of the backend server.
+    /// * `req_bytes` -- the raw bytes of the HTTP upgrade request that were
+    ///   already read from `client_stream`.
     pub async fn proxy_websocket<S>(
         mut client_stream: S,
         upstream_addr: &str,
@@ -59,6 +59,7 @@ impl WebSocketProxy {
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
     {
+        // 1. Connect to the upstream backend.
         let mut upstream_stream =
             tokio::net::TcpStream::connect(upstream_addr).await.map_err(|err| {
                 error!(
@@ -71,10 +72,14 @@ impl WebSocketProxy {
 
         info!(upstream = %upstream_addr, "WebSocket: connected to upstream");
 
+        // 2. Forward the original upgrade request to the upstream.
         upstream_stream.write_all(req_bytes).await?;
         upstream_stream.flush().await?;
         debug!("WebSocket: forwarded upgrade request ({} bytes)", req_bytes.len());
 
+        // 3. Read the upstream's response to the upgrade request and forward
+        //    it back to the client.  We read until we see the end-of-headers
+        //    marker (\r\n\r\n).
         let mut resp_buf = vec![0u8; 4096];
         let mut resp_len: usize = 0;
         let mut header_complete = false;
@@ -87,6 +92,7 @@ impl WebSocketProxy {
             }
             resp_len += n;
 
+            // Check for end-of-headers.
             if resp_len >= 4 {
                 for i in 0..=(resp_len - 4) {
                     if &resp_buf[i..i + 4] == b"\r\n\r\n" {
@@ -100,6 +106,7 @@ impl WebSocketProxy {
                 break;
             }
 
+            // Grow the buffer if needed.
             if resp_len == resp_buf.len() {
                 if resp_buf.len() >= 65536 {
                     return Err("WebSocket: upstream handshake response too large".into());
@@ -108,6 +115,7 @@ impl WebSocketProxy {
             }
         }
 
+        // Forward the handshake response to the client.
         client_stream.write_all(&resp_buf[..resp_len]).await?;
         client_stream.flush().await?;
         debug!(
@@ -115,6 +123,7 @@ impl WebSocketProxy {
             resp_len
         );
 
+        // Verify we got a 101 Switching Protocols.
         let resp_header = String::from_utf8_lossy(&resp_buf[..resp_len.min(64)]);
         if !resp_header.contains("101") {
             warn!(
@@ -126,11 +135,14 @@ impl WebSocketProxy {
 
         info!("WebSocket: handshake complete, starting bidirectional relay");
 
+        // 4. Bidirectional byte copy.
+        //    We split both streams and copy in both directions concurrently.
         let (mut client_read, mut client_write) = tokio::io::split(client_stream);
         let (mut upstream_read, mut upstream_write) = tokio::io::split(upstream_stream);
 
         let client_to_upstream = async {
             let result = tokio::io::copy(&mut client_read, &mut upstream_write).await;
+            // Shut down the write side so the upstream sees EOF.
             let _ = upstream_write.shutdown().await;
             result
         };

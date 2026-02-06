@@ -8,6 +8,9 @@ use tracing::{debug, info, warn};
 
 use crate::config::settings::IpReputationConfig;
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReputationCategory {
@@ -50,6 +53,9 @@ impl IpEntry {
     }
 }
 
+// ---------------------------------------------------------------------------
+// IpReputationManager
+// ---------------------------------------------------------------------------
 
 pub struct IpReputationManager {
     entries: DashMap<IpAddr, IpEntry>,
@@ -77,8 +83,8 @@ impl IpReputationManager {
         manager
     }
 
-    /
-    /
+    /// Check an IP and return the reputation score contribution for the pipeline.
+    /// Returns (score_to_add, should_block).
     pub fn check(&self, ip: &IpAddr) -> (f64, bool) {
         if !self.config.enabled {
             return (0.0, false);
@@ -86,11 +92,14 @@ impl IpReputationManager {
 
         let mut score = 0.0;
 
+        // Check if Tor exit node
         if self.config.tor_detection && self.tor_exits.contains_key(ip) {
             score += self.config.tor_score;
         }
 
+        // Check reputation score
         if let Some(entry) = self.entries.get(ip) {
+            // Apply decay first
             let now = Instant::now();
             let decay_interval = Duration::from_secs(self.config.decay_interval_secs);
             let elapsed_since_decay = now.duration_since(entry.last_decay);
@@ -102,16 +111,19 @@ impl IpReputationManager {
                 rep_score *= decay_factor;
             }
 
+            // Block threshold
             if rep_score >= self.config.block_threshold {
                 return (rep_score, true);
             }
 
+            // High reputation adds score
             if rep_score >= 50.0 {
                 score += self.config.high_reputation_score;
             } else if rep_score >= 25.0 {
                 score += self.config.high_reputation_score * 0.5;
             }
 
+            // Category-based scoring
             if entry.categories.contains(&ReputationCategory::KnownProxy) {
                 score += 10.0;
             }
@@ -123,7 +135,7 @@ impl IpReputationManager {
         (score, false)
     }
 
-    /
+    /// Record a block event for an IP.
     pub fn record_block(&self, ip: &IpAddr) {
         if !self.config.enabled {
             return;
@@ -136,7 +148,7 @@ impl IpReputationManager {
         entry.last_seen = Instant::now();
     }
 
-    /
+    /// Record a challenge event for an IP.
     pub fn record_challenge(&self, ip: &IpAddr) {
         if !self.config.enabled {
             return;
@@ -149,11 +161,12 @@ impl IpReputationManager {
         entry.last_seen = Instant::now();
     }
 
-    /
+    /// Record a pass event for an IP (slight reputation improvement).
     pub fn record_pass(&self, ip: &IpAddr) {
         if !self.config.enabled {
             return;
         }
+        // Only update existing entries (don't create entries for every passing IP)
         if let Some(mut entry) = self.entries.get_mut(ip) {
             self.apply_decay(&mut entry);
             entry.total_requests += 1;
@@ -163,13 +176,13 @@ impl IpReputationManager {
         }
     }
 
-    /
+    /// Add a category to an IP's reputation.
     pub fn add_category(&self, ip: &IpAddr, category: ReputationCategory) {
         let mut entry = self.entries.entry(*ip).or_insert_with(IpEntry::new);
         entry.categories.insert(category);
     }
 
-    /
+    /// Get the reputation score for an IP (for admin API).
     pub fn get_score(&self, ip: &IpAddr) -> f64 {
         self.entries
             .get(ip)
@@ -177,7 +190,7 @@ impl IpReputationManager {
             .unwrap_or(0.0)
     }
 
-    /
+    /// Get the blocked count for an IP.
     pub fn get_blocked_count(&self, ip: &IpAddr) -> u64 {
         self.entries
             .get(ip)
@@ -185,7 +198,7 @@ impl IpReputationManager {
             .unwrap_or(0)
     }
 
-    /
+    /// Get the ban count for an IP (used by auto-ban).
     pub fn get_ban_count(&self, ip: &IpAddr) -> u32 {
         self.entries
             .get(ip)
@@ -193,18 +206,18 @@ impl IpReputationManager {
             .unwrap_or(0)
     }
 
-    /
+    /// Increment the ban count for an IP.
     pub fn increment_ban_count(&self, ip: &IpAddr) {
         let mut entry = self.entries.entry(*ip).or_insert_with(IpEntry::new);
         entry.ban_count += 1;
     }
 
-    /
+    /// Check if an IP is a known Tor exit node.
     pub fn is_tor_exit(&self, ip: &IpAddr) -> bool {
         self.tor_exits.contains_key(ip)
     }
 
-    /
+    /// Get top IPs by reputation score (for admin API).
     pub fn get_top_ips(&self, limit: usize) -> Vec<(IpAddr, f64, u64, u64, Vec<String>)> {
         let mut entries: Vec<_> = self.entries.iter().map(|e| {
             let cats: Vec<String> = e.categories.iter().map(|c| format!("{:?}", c)).collect();
@@ -215,22 +228,26 @@ impl IpReputationManager {
         entries
     }
 
-    /
+    /// Cleanup old entries with zero score and no recent activity.
     pub fn cleanup(&self) {
         let now = Instant::now();
-        let stale_threshold = Duration::from_secs(3600);
+        let stale_threshold = Duration::from_secs(3600); // 1 hour
 
         self.entries.retain(|_, entry| {
             let age = now.duration_since(entry.last_seen);
+            // Keep entries with score > 1 or seen in the last hour
             entry.score > 1.0 || age < stale_threshold
         });
     }
 
-    /
+    /// Total tracked IPs count.
     pub fn tracked_count(&self) -> usize {
         self.entries.len()
     }
 
+    // -----------------------------------------------------------------------
+    // Private helpers
+    // -----------------------------------------------------------------------
 
     fn apply_decay(&self, entry: &mut IpEntry) {
         let now = Instant::now();
@@ -244,10 +261,11 @@ impl IpReputationManager {
         }
     }
 
-    /
-    /
-    /
+    /// Load well-known Tor exit node IPs.
+    /// These are a representative sample of commonly used exit nodes.
+    /// In production, this should be updated from a live feed periodically.
     fn load_tor_exit_nodes(&self) {
+        // Well-known Tor exit node IPs (representative sample)
         let tor_exits = [
             "185.220.100.240", "185.220.100.241", "185.220.100.242", "185.220.100.243",
             "185.220.100.244", "185.220.100.245", "185.220.100.246", "185.220.100.247",

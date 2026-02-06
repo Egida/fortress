@@ -6,13 +6,13 @@ use crate::config::settings::Settings;
 use crate::models::threat::{ProtectionLevel, ThreatReason};
 use crate::storage::memory::{MemoryStore, RateLimitConfig};
 
-/
+/// Multi-tier rate limiter using the MemoryStore's sliding window counters.
 ///
-/
-/
+/// Delegates to `MemoryStore::check_rate_limit()` which checks per-IP,
+/// per-subnet, per-ASN, and per-country sliding windows in a single call.
 ///
-/
-/
+/// The rate-limit thresholds scale with the current protection level.
+/// Higher protection levels have lower thresholds.
 pub struct RateLimiter {
     memory: Arc<MemoryStore>,
 }
@@ -22,10 +22,10 @@ impl RateLimiter {
         Self { memory }
     }
 
-    /
+    /// Check all rate limit tiers for the given request context.
     ///
-    /
-    /
+    /// Returns `Some(ThreatReason::RateLimit)` if any tier is exceeded,
+    /// `None` if all pass.
     pub fn check(
         &self,
         ip: IpAddr,
@@ -56,11 +56,11 @@ impl RateLimiter {
         None
     }
 
-    /
-    /
+    /// Build a `RateLimitConfig` (per-second thresholds) for the current
+    /// protection level by dividing the settings' per-10s values by 10.
     ///
-    /
-    /
+    /// For L4 (emergency lockdown) there is no settings entry, so we use
+    /// very restrictive hard-coded defaults.
     fn get_limits_for_level(&self, level: &ProtectionLevel, settings: &Settings) -> RateLimitConfig {
         let rate_limits = &settings.protection.rate_limits;
 
@@ -70,6 +70,7 @@ impl RateLimiter {
             ProtectionLevel::L2 => Self::config_to_per_second(&rate_limits.level_2),
             ProtectionLevel::L3 => Self::config_to_per_second(&rate_limits.level_3),
             ProtectionLevel::L4 => {
+                // L4 (emergency): restrictive but still allows some traffic
                 RateLimitConfig {
                     ip_per_second: 5,
                     subnet_per_second: 20,
@@ -80,9 +81,9 @@ impl RateLimiter {
         }
     }
 
-    /
-    /
-    /
+    /// Convert a settings-level `RateLimitConfig` (per-10s) into the
+    /// memory-store `RateLimitConfig` (per-second) by dividing by 10,
+    /// with a floor of 1 to avoid zero limits.
     fn config_to_per_second(
         cfg: &crate::config::settings::RateLimitConfig,
     ) -> RateLimitConfig {

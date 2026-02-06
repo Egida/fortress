@@ -2,17 +2,20 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+// ---------------------------------------------------------------------------
+// ThreatAction
+// ---------------------------------------------------------------------------
 
-/
+/// The action to take against a request after threat evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ThreatAction {
-    /
+    /// Allow the request through to the upstream.
     Pass,
-    /
+    /// Serve a proof-of-work / JS challenge page.
     Challenge,
-    /
+    /// Immediately reject the request (403).
     Block,
-    /
+    /// Accept the connection but respond extremely slowly.
     Tarpit,
 }
 
@@ -28,7 +31,7 @@ impl fmt::Display for ThreatAction {
 }
 
 impl ThreatAction {
-    /
+    /// Convert from a string representation.
     pub fn from_str_name(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "pass" => Some(Self::Pass),
@@ -39,47 +42,50 @@ impl ThreatAction {
         }
     }
 
-    /
+    /// Whether this action prevents the request from reaching the upstream.
     pub fn is_blocking(&self) -> bool {
         matches!(self, ThreatAction::Block | ThreatAction::Tarpit)
     }
 }
 
+// ---------------------------------------------------------------------------
+// ThreatReason
+// ---------------------------------------------------------------------------
 
-/
+/// The reason a particular threat action was chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ThreatReason {
-    /
+    /// Per-IP, per-subnet, per-ASN, or per-country rate limit exceeded.
     RateLimit,
-    /
+    /// JA3 or TLS fingerprint matches a known bad actor profile.
     BadFingerprint,
-    /
+    /// Behavioral analysis flagged the client as suspicious.
     SuspiciousBehavior,
-    /
+    /// Traffic originates from a known mobile/residential proxy network.
     MobileProxy,
-    /
+    /// Client IP is in a blocked country.
     BlockedCountry,
-    /
+    /// Client IP belongs to a blocked ASN.
     BlockedAsn,
-    /
+    /// Client IP is explicitly blocklisted.
     BlockedIp,
-    /
+    /// Request headers exhibit anomalies (missing, contradictory, etc.).
     HeaderAnomaly,
-    /
+    /// Slow-read / slow-POST attack pattern detected.
     Slowloris,
-    /
+    /// Manually added to the blocklist via the admin API.
     ManualBlock,
-    /
+    /// Client must complete a challenge before proceeding.
     ChallengeRequired,
-    /
+    /// IP has bad reputation from past behavior.
     BadReputation,
-    /
+    /// IP is automatically banned due to repeated offenses.
     AutoBanned,
-    /
+    /// Request matched a managed security rule.
     ManagedRule,
-    /
+    /// Distributed attack pattern detected.
     DistributedAttack,
-    /
+    /// Request matched a user-defined custom rule.
     CustomRule,
 }
 
@@ -107,7 +113,7 @@ impl fmt::Display for ThreatReason {
 }
 
 impl ThreatReason {
-    /
+    /// Convert from a string representation.
     pub fn from_str_name(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "rate_limit" => Some(Self::RateLimit),
@@ -131,19 +137,22 @@ impl ThreatReason {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ProtectionLevel
+// ---------------------------------------------------------------------------
 
-/
+/// System-wide protection posture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ProtectionLevel {
-    /
+    /// Level 0 -- normal traffic; minimal intervention.
     L0 = 0,
-    /
+    /// Level 1 -- elevated traffic; lightweight challenges.
     L1 = 1,
-    /
+    /// Level 2 -- active attack; aggressive challenges.
     L2 = 2,
-    /
+    /// Level 3 -- severe attack; strict rate limits and challenges.
     L3 = 3,
-    /
+    /// Level 4 -- emergency; near-total lockdown.
     L4 = 4,
 }
 
@@ -160,7 +169,7 @@ impl fmt::Display for ProtectionLevel {
 }
 
 impl ProtectionLevel {
-    /
+    /// Convert a numeric level (0..=4) to a `ProtectionLevel`.
     pub fn from_u8(level: u8) -> Option<Self> {
         match level {
             0 => Some(Self::L0),
@@ -172,12 +181,12 @@ impl ProtectionLevel {
         }
     }
 
-    /
+    /// Return the numeric value of this protection level.
     pub fn as_u8(&self) -> u8 {
         *self as u8
     }
 
-    /
+    /// Escalate to the next level, capping at L4.
     pub fn escalate(&self) -> Self {
         match self {
             Self::L0 => Self::L1,
@@ -188,7 +197,7 @@ impl ProtectionLevel {
         }
     }
 
-    /
+    /// De-escalate to the previous level, flooring at L0.
     pub fn deescalate(&self) -> Self {
         match self {
             Self::L0 => Self::L0,
@@ -199,7 +208,7 @@ impl ProtectionLevel {
         }
     }
 
-    /
+    /// Convert from a string representation.
     pub fn from_str_name(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "normal" | "l0" | "0" => Some(Self::L0),

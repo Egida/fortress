@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/
+/// Configuration for a single protected service/backend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceConfig {
     pub id: String,

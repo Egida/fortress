@@ -5,7 +5,7 @@ use tracing::info;
 
 use crate::models::request::RequestContext;
 
-/
+/// A managed rule action.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RuleAction {
     Block,
@@ -13,7 +13,7 @@ pub enum RuleAction {
     Score(f64),
 }
 
-/
+/// Result of checking a request against managed rules.
 #[derive(Debug, Clone)]
 pub struct ManagedRuleResult {
     pub matched_rule: Option<String>,
@@ -21,9 +21,9 @@ pub struct ManagedRuleResult {
     pub rule_id: u32,
 }
 
-/
+/// Per-IP rate tracking for endpoint-specific rules.
 struct EndpointRateTracker {
-    /
+    /// Map of (IP, path_prefix) -> (count, window_start)
     counters: DashMap<(String, String), (u32, Instant)>,
 }
 
@@ -56,13 +56,13 @@ impl EndpointRateTracker {
     }
 }
 
-/
+/// Managed rules engine with 20 pre-built security rules.
 pub struct ManagedRulesEngine {
-    /
+    /// Which rules are enabled (rule_id -> enabled)
     enabled_rules: DashMap<u32, bool>,
-    /
+    /// Per-endpoint rate tracker
     endpoint_rates: EndpointRateTracker,
-    /
+    /// Per-UA flood tracker: UA -> (count, window_start)
     ua_flood: DashMap<String, (u32, Instant)>,
 }
 
@@ -74,6 +74,7 @@ impl ManagedRulesEngine {
             ua_flood: DashMap::new(),
         };
 
+        // Enable all rules by default except api_rate_limit (rule 19)
         for id in 1..=20 {
             engine.enabled_rules.insert(id, id != 19);
         }
@@ -82,8 +83,8 @@ impl ManagedRulesEngine {
         engine
     }
 
-    /
-    /
+    /// Check a request against all enabled managed rules.
+    /// Returns None if no rule matched, or Some with the matching rule result.
     pub fn check(&self, ctx: &RequestContext) -> Option<ManagedRuleResult> {
         let path = ctx.path.as_str();
         let method = ctx.method.as_str();
@@ -91,6 +92,7 @@ impl ManagedRulesEngine {
         let ip_str = ctx.client_ip.to_string();
         let headers = &ctx.headers;
 
+        // Rule 1: Path traversal
         if self.is_enabled(1) {
             if path.contains("../") || path.contains("..%2f") || path.contains("..%2F")
                 || path.contains("%2e%2e/") || path.contains("%2e%2e%2f") {
@@ -102,6 +104,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 2: Sensitive files access
         if self.is_enabled(2) {
             let sensitive = path == "/.env" || path.starts_with("/.env.")
                 || path.starts_with("/.git/") || path == "/.git"
@@ -121,6 +124,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 3: Backup files
         if self.is_enabled(3) {
             if path.ends_with(".bak") || path.ends_with(".old") || path.ends_with(".swp")
                 || path.ends_with(".sql") || path.ends_with(".sql.gz")
@@ -134,6 +138,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 4: Hidden files (except .well-known)
         if self.is_enabled(4) {
             if path.starts_with("/.") && !path.starts_with("/.well-known") {
                 return Some(ManagedRuleResult {
@@ -144,6 +149,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 5: Login rate limit (5 per minute per IP)
         if self.is_enabled(5) {
             if (path.starts_with("/login") || path.starts_with("/signin") || path == "/auth/login")
                 && (method == "POST" || method == "GET") {
@@ -157,6 +163,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 6: Registration rate limit (3 per minute per IP)
         if self.is_enabled(6) {
             if (path.starts_with("/register") || path.starts_with("/signup")) && method == "POST" {
                 if self.endpoint_rates.check(&ip_str, "/register", 3, 60) {
@@ -169,6 +176,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 7: Password reset rate limit (2 per minute per IP)
         if self.is_enabled(7) {
             if (path.starts_with("/forgot-password") || path.starts_with("/reset-password")
                 || path.starts_with("/password/reset")) && method == "POST" {
@@ -182,6 +190,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 8: Large payload (Content-Length > 10MB)
         if self.is_enabled(8) {
             if let Some(cl) = headers.get("content-length") {
                 if let Ok(size) = cl.parse::<u64>() {
@@ -196,6 +205,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 9: Missing Content-Type on POST/PUT
         if self.is_enabled(9) {
             if (method == "POST" || method == "PUT") && !headers.contains_key("content-type") {
                 return Some(ManagedRuleResult {
@@ -206,6 +216,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 10: Empty UA + POST
         if self.is_enabled(10) {
             if ua.is_empty() && method == "POST" {
                 return Some(ManagedRuleResult {
@@ -216,9 +227,11 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 11: Fake Google bot
         if self.is_enabled(11) {
             let ua_lower = ua.to_lowercase();
             if ua_lower.contains("googlebot") || ua_lower.contains("google-inspectiontool") {
+                // Real Googlebot IPs are in 66.249.x.x or 64.233.x.x ranges
                 let ip = ctx.client_ip;
                 let is_google = match ip {
                     std::net::IpAddr::V4(v4) => {
@@ -241,6 +254,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 12: Fake Bing bot
         if self.is_enabled(12) {
             let ua_lower = ua.to_lowercase();
             if ua_lower.contains("bingbot") || ua_lower.contains("msnbot") {
@@ -248,6 +262,7 @@ impl ManagedRulesEngine {
                 let is_bing = match ip {
                     std::net::IpAddr::V4(v4) => {
                         let octets = v4.octets();
+                        // Microsoft IP ranges: 40.x.x.x, 13.x.x.x, 157.55.x.x, 207.46.x.x
                         octets[0] == 40 || octets[0] == 13
                             || (octets[0] == 157 && octets[1] == 55)
                             || (octets[0] == 207 && octets[1] == 46)
@@ -266,6 +281,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 13: HTTP method restrict (TRACE/TRACK/CONNECT/DEBUG)
         if self.is_enabled(13) {
             if method == "TRACE" || method == "TRACK" || method == "CONNECT" || method == "DEBUG" {
                 return Some(ManagedRuleResult {
@@ -276,6 +292,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 14: Request smuggling (TE + CL together)
         if self.is_enabled(14) {
             if headers.contains_key("transfer-encoding") && headers.contains_key("content-length") {
                 return Some(ManagedRuleResult {
@@ -286,6 +303,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 15: Host header injection
         if self.is_enabled(15) {
             if let Some(host) = headers.get("host") {
                 if host.contains('@') || host.contains(' ') || host.contains('\t') {
@@ -298,6 +316,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 16: Referer spam
         if self.is_enabled(16) {
             if let Some(referer) = headers.get("referer") {
                 let ref_lower = referer.to_lowercase();
@@ -318,6 +337,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 17: Connection flood by UA (same UA 1000+ req/min)
         if self.is_enabled(17) && !ua.is_empty() {
             let now = Instant::now();
             let mut entry = self.ua_flood.entry(ua.to_string()).or_insert((0, now));
@@ -336,7 +356,9 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 18: Slow POST detection is handled by slowloris detector, skip here
 
+        // Rule 19: API rate limit (off by default, configurable)
         if self.is_enabled(19) {
             if path.starts_with("/api/") {
                 if self.endpoint_rates.check(&ip_str, "/api/", 100, 60) {
@@ -349,6 +371,7 @@ impl ManagedRulesEngine {
             }
         }
 
+        // Rule 20: Invalid HTTP method
         if self.is_enabled(20) {
             let valid_methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS",
                                "TRACE", "CONNECT"];
@@ -364,7 +387,7 @@ impl ManagedRulesEngine {
         None
     }
 
-    /
+    /// Enable or disable a rule.
     pub fn set_rule_enabled(&self, rule_id: u32, enabled: bool) -> bool {
         if rule_id >= 1 && rule_id <= 20 {
             self.enabled_rules.insert(rule_id, enabled);
@@ -375,7 +398,7 @@ impl ManagedRulesEngine {
         }
     }
 
-    /
+    /// Get all rules with their enabled status.
     pub fn get_rules(&self) -> Vec<(u32, String, String, bool)> {
         let rule_info = [
             (1, "path_traversal", "Block path traversal attempts (../)"),
@@ -406,12 +429,12 @@ impl ManagedRulesEngine {
         }).collect()
     }
 
-    /
+    /// Check if a rule is enabled.
     fn is_enabled(&self, rule_id: u32) -> bool {
         self.enabled_rules.get(&rule_id).map(|v| *v).unwrap_or(false)
     }
 
-    /
+    /// Cleanup stale rate tracking data.
     pub fn cleanup(&self) {
         self.endpoint_rates.cleanup();
         let now = Instant::now();

@@ -4,8 +4,8 @@ use std::fs;
 
 use super::defaults;
 
-/
-/
+/// Top-level configuration for the Fortress anti-DDoS proxy.
+/// Deserializes from a TOML configuration file.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Settings {
     #[serde(default = "defaults::default_server_config")]
@@ -73,7 +73,7 @@ pub struct Settings {
 }
 
 impl Settings {
-    /
+    /// Load configuration from a TOML file at the given path.
     pub fn load(path: &str) -> Result<Self> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path))?;
@@ -111,7 +111,7 @@ impl Default for Settings {
     }
 }
 
-/
+/// HTTP/HTTPS server configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerConfig {
     #[serde(default = "defaults::default_bind_http")]
@@ -136,7 +136,7 @@ pub struct ServerConfig {
     pub keepalive_timeout_secs: u64,
 }
 
-/
+/// TLS configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TlsConfig {
     #[serde(default = "defaults::default_cert_dir")]
@@ -146,7 +146,7 @@ pub struct TlsConfig {
     pub min_version: String,
 }
 
-/
+/// Upstream backend server configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpstreamConfig {
     #[serde(default = "defaults::default_upstream_address")]
@@ -162,7 +162,7 @@ pub struct UpstreamConfig {
     pub response_timeout_ms: u64,
 }
 
-/
+/// Admin API configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AdminApiConfig {
     #[serde(default = "defaults::default_admin_bind")]
@@ -172,7 +172,7 @@ pub struct AdminApiConfig {
     pub api_key: String,
 }
 
-/
+/// GeoIP database configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GeoipConfig {
     #[serde(default = "defaults::default_city_db")]
@@ -182,7 +182,7 @@ pub struct GeoipConfig {
     pub asn_db: String,
 }
 
-/
+/// Protection configuration with nested rate-limit levels.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProtectionConfig {
     #[serde(default)]
@@ -204,7 +204,7 @@ pub struct ProtectionConfig {
     pub whitelisted_subnets: Vec<String>,
 }
 
-/
+/// Rate-limit thresholds for each protection level.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimitLevels {
     #[serde(default = "defaults::default_rate_limit_level_0")]
@@ -220,7 +220,7 @@ pub struct RateLimitLevels {
     pub level_3: RateLimitConfig,
 }
 
-/
+/// Per-level rate-limit thresholds (requests per 10-second window).
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimitConfig {
     #[serde(default = "defaults::default_ip_per_10s")]
@@ -236,7 +236,7 @@ pub struct RateLimitConfig {
     pub country_per_10s: u64,
 }
 
-/
+/// Challenge (proof-of-work) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChallengeConfig {
     #[serde(default = "defaults::default_pow_difficulty_l1")]
@@ -267,7 +267,7 @@ pub struct ChallengeConfig {
     pub nojs_fallback_enabled: bool,
 }
 
-/
+/// Blocklist configuration for countries, ASNs, and IPs.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BlocklistConfig {
     #[serde(default)]
@@ -283,7 +283,7 @@ pub struct BlocklistConfig {
     pub country_challenge_score: f64,
 }
 
-/
+/// Behavioral analysis configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BehavioralConfig {
     #[serde(default = "defaults::default_scoring_window_secs")]
@@ -299,7 +299,7 @@ pub struct BehavioralConfig {
     pub path_diversity_min_requests: u64,
 }
 
-/
+/// Automatic escalation/de-escalation configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct EscalationConfig {
     #[serde(default = "defaults::default_check_interval_secs")]
@@ -327,7 +327,7 @@ pub struct EscalationConfig {
     pub block_ratio_threshold: f64,
 }
 
-/
+/// Logging configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct LoggingConfig {
     #[serde(default = "defaults::default_log_level")]
@@ -340,14 +340,14 @@ pub struct LoggingConfig {
     pub access_log: String,
 }
 
-/
+/// Storage configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct StorageConfig {
     #[serde(default = "defaults::default_sqlite_path")]
     pub sqlite_path: String,
 }
 
-/
+/// L4 (TCP-level) protection configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct L4ProtectionConfig {
     #[serde(default = "defaults::default_l4_enabled")]
@@ -369,7 +369,7 @@ pub struct L4ProtectionConfig {
     pub tarpit_delay_ms: u64,
 }
 
-/
+/// Alerting configuration (webhook notifications).
 #[derive(Debug, Clone, Deserialize)]
 pub struct AlertingConfig {
     #[serde(default)]
@@ -379,7 +379,7 @@ pub struct AlertingConfig {
     pub webhook_url: Option<String>,
 }
 
-/
+/// Bot whitelist configuration for known search engine crawlers.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BotWhitelistConfig {
     #[serde(default = "defaults::default_bot_whitelist_enabled")]
@@ -389,7 +389,7 @@ pub struct BotWhitelistConfig {
     pub verify_ip: bool,
 }
 
-/
+/// Mobile proxy detection tuning.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MobileProxyConfig {
     #[serde(default = "defaults::default_mobile_proxy_min_signals")]
@@ -399,7 +399,7 @@ pub struct MobileProxyConfig {
     pub score_threshold: f64,
 }
 
-/
+/// ASN reputation scoring configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AsnScoringConfig {
     #[serde(default = "defaults::default_datacenter_score")]
@@ -412,7 +412,7 @@ pub struct AsnScoringConfig {
     pub residential_proxy_score: f64,
 }
 
-/
+/// IP reputation system configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct IpReputationConfig {
     #[serde(default = "defaults::default_ip_reputation_enabled")]
@@ -437,7 +437,7 @@ pub struct IpReputationConfig {
     pub high_reputation_score: f64,
 }
 
-/
+/// Auto-ban configuration for repeated offenders.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AutoBanConfig {
     #[serde(default = "defaults::default_auto_ban_enabled")]
@@ -459,8 +459,8 @@ pub struct AutoBanConfig {
     pub subnet_ban_ratio: f64,
 }
 
-/
-/
+/// Cloudflare compatibility configuration.
+/// When enabled, Fortress trusts CF-Connecting-IP headers from Cloudflare IP ranges.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudflareConfig {
     #[serde(default)]

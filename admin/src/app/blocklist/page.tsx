@@ -22,21 +22,25 @@ type Tab = 'ip' | 'asn' | 'country';
 export default function BlocklistPage() {
   const [activeTab, setActiveTab] = useState<Tab>('ip');
 
+  // --------------- IP state ---------------
   const [ips, setIps] = useState<BlockedIp[]>([]);
   const [ipLoading, setIpLoading] = useState(false);
   const [showIpForm, setShowIpForm] = useState(false);
   const [ipForm, setIpForm] = useState({ ip: '', reason: '', ttl: '' });
 
+  // --------------- ASN state ---------------
   const [asns, setAsns] = useState<BlockedAsn[]>([]);
   const [asnLoading, setAsnLoading] = useState(false);
   const [showAsnForm, setShowAsnForm] = useState(false);
   const [asnForm, setAsnForm] = useState({ asn: '', reason: '' });
 
+  // --------------- Country state ---------------
   const [countries, setCountries] = useState<BlockedCountry[]>([]);
   const [countryLoading, setCountryLoading] = useState(false);
   const [showCountryForm, setShowCountryForm] = useState(false);
   const [countryForm, setCountryForm] = useState({ code: '', reason: '' });
 
+  // --------------- Fetchers ---------------
   const fetchIps = useCallback(async () => {
     setIpLoading(true);
     try {
@@ -79,6 +83,7 @@ export default function BlocklistPage() {
     else fetchCountries();
   }, [activeTab, fetchIps, fetchAsns, fetchCountries]);
 
+  // --------------- Add handlers ---------------
   const addIp = async () => {
     if (!ipForm.ip) return;
     try {
@@ -128,6 +133,7 @@ export default function BlocklistPage() {
     }
   };
 
+  // --------------- Delete handlers ---------------
   const deleteIp = async (id: number) => {
     if (!confirm('Remove this IP from the blocklist?')) return;
     try {
@@ -158,6 +164,7 @@ export default function BlocklistPage() {
     }
   };
 
+  // --------------- Shared styles ---------------
   const tabClass = (tab: Tab) => {
     const isActive = activeTab === tab;
     return `flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-all ${
@@ -182,6 +189,7 @@ export default function BlocklistPage() {
   const thClass = 'text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-4 py-3';
   const tdClass = 'px-4 py-3.5 text-sm text-zinc-300 whitespace-nowrap';
 
+  // --------------- Render helpers ---------------
   const renderLoading = () => (
     <div className="space-y-2 py-6">
       {Array.from({ length: 4 }).map((_, i) => (
@@ -217,6 +225,7 @@ export default function BlocklistPage() {
     }
   };
 
+  // --------------- IP Tab ---------------
   const renderIpTab = () => (
     <>
       <div className="flex items-center justify-between mb-5">
@@ -353,6 +362,7 @@ export default function BlocklistPage() {
     </>
   );
 
+  // --------------- ASN Tab ---------------
   const renderAsnTab = () => (
     <>
       <div className="flex items-center justify-between mb-5">
@@ -469,6 +479,7 @@ export default function BlocklistPage() {
     </>
   );
 
+  // --------------- Country Tab ---------------
   const renderCountryTab = () => (
     <>
       <div className="flex items-center justify-between mb-5">
@@ -590,6 +601,7 @@ export default function BlocklistPage() {
     </>
   );
 
+  // --------------- Tab config ---------------
   const tabConfig: { key: Tab; label: string; icon: React.ReactNode; count: number }[] = [
     {
       key: 'ip',
@@ -611,6 +623,7 @@ export default function BlocklistPage() {
     },
   ];
 
+  // --------------- Main render ---------------
   return (
     <div className="min-h-screen bg-black text-zinc-100 p-6 space-y-6">
       {/* Header */}

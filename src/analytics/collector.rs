@@ -7,7 +7,7 @@ use parking_lot::RwLock;
 
 use crate::models::metrics::MetricsSnapshot;
 
-/
+/// Per-second snapshot of request metrics.
 #[derive(Clone, Debug)]
 pub struct SecondSnapshot {
     pub timestamp: u64,
@@ -17,33 +17,42 @@ pub struct SecondSnapshot {
     pub passed: u64,
 }
 
-/
+/// Real-time metrics collector with per-second granularity.
 ///
-/
-/
-/
-/
+/// All mutating operations are lock-free on the hot path (atomic counters
+/// and `DashMap` shards). The only coarse lock is the `RwLock` on the
+/// rolling snapshot ring, which is written to once per second by the
+/// reporter tick and read only by the admin API.
 pub struct MetricsCollector {
+    // ---- counters reset every second ----
     current_second_requests: AtomicU64,
     current_second_blocked: AtomicU64,
     current_second_challenged: AtomicU64,
     current_second_passed: AtomicU64,
 
+    // Rolling per-second snapshots (last 3600 = 1 hour)
     second_snapshots: RwLock<Vec<SecondSnapshot>>,
 
+    // Per-IP request count (for top-IPs)
     ip_counts: DashMap<IpAddr, u64>,
 
+    // Per-country counts
     country_counts: DashMap<String, u64>,
 
+    // Per-ASN counts
     asn_counts: DashMap<u32, u64>,
 
+    // Per-JA3 fingerprint counts
     ja3_counts: DashMap<String, u64>,
 
+    // Latency tracking (microseconds)
     total_latency_us: AtomicU64,
     latency_count: AtomicU64,
 
+    // Unique IPs seen this hour
     unique_ips: DashMap<IpAddr, ()>,
 
+    // Total counters (never reset, used for lifetime stats)
     total_requests: AtomicU64,
     total_blocked: AtomicU64,
 
@@ -53,7 +62,7 @@ pub struct MetricsCollector {
 const MAX_SNAPSHOTS: usize = 3600;
 
 impl MetricsCollector {
-    /
+    /// Create a new, zeroed-out collector.
     pub fn new() -> Self {
         Self {
             current_second_requests: AtomicU64::new(0),
@@ -80,9 +89,9 @@ impl MetricsCollector {
         }
     }
 
-    /
+    /// Record a single request on the hot path.
     ///
-    /
+    /// `action` must be one of `"blocked"`, `"challenged"`, or `"passed"`.
     pub fn record_request(
         &self,
         ip: IpAddr,
@@ -92,6 +101,7 @@ impl MetricsCollector {
         action: &str,
         latency_us: u64,
     ) {
+        // Global per-second counters
         self.current_second_requests.fetch_add(1, Ordering::Relaxed);
         self.total_requests.fetch_add(1, Ordering::Relaxed);
 
@@ -108,13 +118,16 @@ impl MetricsCollector {
             }
         }
 
+        // Per-IP
         self.ip_counts
             .entry(ip)
             .and_modify(|c| *c += 1)
             .or_insert(1);
 
+        // Unique IP tracking
         self.unique_ips.entry(ip).or_insert(());
 
+        // Per-country
         if let Some(cc) = country {
             self.country_counts
                 .entry(cc.to_string())
@@ -122,6 +135,7 @@ impl MetricsCollector {
                 .or_insert(1);
         }
 
+        // Per-ASN
         if let Some(asn_id) = asn {
             self.asn_counts
                 .entry(asn_id)
@@ -129,6 +143,7 @@ impl MetricsCollector {
                 .or_insert(1);
         }
 
+        // Per-JA3
         if let Some(fingerprint) = ja3 {
             self.ja3_counts
                 .entry(fingerprint.to_string())
@@ -136,12 +151,13 @@ impl MetricsCollector {
                 .or_insert(1);
         }
 
+        // Latency accumulation
         self.total_latency_us.fetch_add(latency_us, Ordering::Relaxed);
         self.latency_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    /
-    /
+    /// Called every second by the reporter.  Snapshots current counters into
+    /// the rolling ring buffer and resets the per-second atomics.
     pub fn tick(&self) {
         let requests = self.current_second_requests.swap(0, Ordering::Relaxed);
         let blocked = self.current_second_blocked.swap(0, Ordering::Relaxed);
@@ -168,13 +184,13 @@ impl MetricsCollector {
         snapshots.push(snapshot);
     }
 
-    /
+    /// Requests recorded during the most recent completed second.
     pub fn get_current_rps(&self) -> f64 {
         let snapshots = self.second_snapshots.read();
         snapshots.last().map(|s| s.requests as f64).unwrap_or(0.0)
     }
 
-    /
+    /// Build a full `MetricsSnapshot` reflecting the current state.
     pub fn get_snapshot(&self) -> MetricsSnapshot {
         let latency_count = self.latency_count.load(Ordering::Relaxed);
         let avg_latency_us = if latency_count > 0 {
@@ -205,7 +221,7 @@ impl MetricsCollector {
         }
     }
 
-    /
+    /// Return the top N IPs by request count, sorted descending.
     pub fn get_top_ips(&self, limit: usize) -> Vec<(IpAddr, u64)> {
         let mut entries: Vec<(IpAddr, u64)> = self
             .ip_counts
@@ -217,7 +233,7 @@ impl MetricsCollector {
         entries
     }
 
-    /
+    /// Return the top N countries by request count, sorted descending.
     pub fn get_top_countries(&self, limit: usize) -> Vec<(String, u64)> {
         let mut entries: Vec<(String, u64)> = self
             .country_counts
@@ -229,7 +245,7 @@ impl MetricsCollector {
         entries
     }
 
-    /
+    /// Return the top N ASNs by request count, sorted descending.
     pub fn get_top_asns(&self, limit: usize) -> Vec<(u32, u64)> {
         let mut entries: Vec<(u32, u64)> = self
             .asn_counts
@@ -241,7 +257,7 @@ impl MetricsCollector {
         entries
     }
 
-    /
+    /// Return the top N JA3 fingerprints by request count, sorted descending.
     pub fn get_top_fingerprints(&self, limit: usize) -> Vec<(String, u64)> {
         let mut entries: Vec<(String, u64)> = self
             .ja3_counts
@@ -253,7 +269,7 @@ impl MetricsCollector {
         entries
     }
 
-    /
+    /// Return the last `last_n` per-second snapshots (most recent last).
     pub fn get_second_history(&self, last_n: usize) -> Vec<SecondSnapshot> {
         let snapshots = self.second_snapshots.read();
         let len = snapshots.len();
@@ -264,7 +280,7 @@ impl MetricsCollector {
         }
     }
 
-    /
+    /// Clear all per-hour aggregates. Called by the reporter every hour.
     pub fn reset_hourly(&self) {
         self.ip_counts.clear();
         self.country_counts.clear();
@@ -276,17 +292,17 @@ impl MetricsCollector {
         self.second_snapshots.write().clear();
     }
 
-    /
+    /// Total requests recorded since the collector was created.
     pub fn total_requests(&self) -> u64 {
         self.total_requests.load(Ordering::Relaxed)
     }
 
-    /
+    /// Total blocked requests since the collector was created.
     pub fn total_blocked(&self) -> u64 {
         self.total_blocked.load(Ordering::Relaxed)
     }
 
-    /
+    /// Uptime in seconds.
     pub fn uptime_secs(&self) -> u64 {
         self.start_time.elapsed().as_secs()
     }

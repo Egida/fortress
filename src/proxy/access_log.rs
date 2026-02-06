@@ -5,15 +5,15 @@ use std::path::Path;
 
 use parking_lot::Mutex;
 
-/
-/
-/
+/// Per-request access logger that writes one JSON line per request.
+/// Uses `File` directly (OS kernel handles buffering) so every write
+/// is immediately visible in the log file — critical for attack analysis.
 pub struct AccessLogger {
     writer: Mutex<File>,
 }
 
 impl AccessLogger {
-    /
+    /// Open (or create) the access log file in append mode.
     pub fn new(path: &str) -> std::io::Result<Self> {
         if let Some(parent) = Path::new(path).parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -29,7 +29,7 @@ impl AccessLogger {
         })
     }
 
-    /
+    /// Write a single access-log entry as a JSON line.
     pub fn log(
         &self,
         client_ip: IpAddr,
@@ -64,7 +64,7 @@ impl AccessLogger {
     }
 }
 
-/
+/// Minimal JSON string escaping (quotes and backslashes).
 fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {

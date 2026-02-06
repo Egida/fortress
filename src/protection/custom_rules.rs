@@ -8,7 +8,7 @@ use crate::models::request::RequestContext;
 use crate::models::threat::ThreatAction;
 use crate::storage::sqlite::SqliteStore;
 
-/
+/// A cached custom rule loaded from the database.
 #[derive(Debug, Clone)]
 pub struct CachedRule {
     pub id: i64,
@@ -19,7 +19,7 @@ pub struct CachedRule {
     pub enabled: bool,
 }
 
-/
+/// Parsed rule condition supporting path, method, country, IP, user-agent matching.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RuleCondition {
     #[serde(default)]
@@ -39,7 +39,7 @@ pub struct RuleCondition {
 }
 
 impl RuleCondition {
-    /
+    /// Check if the request matches ALL specified conditions (AND logic).
     pub fn matches(&self, ctx: &RequestContext) -> bool {
         if let Some(ref path_pattern) = self.path {
             if !pattern_matches(path_pattern, &ctx.path) {
@@ -93,7 +93,7 @@ impl RuleCondition {
     }
 }
 
-/
+/// Simple wildcard pattern matching supporting `*` at start/end.
 fn pattern_matches(pattern: &str, value: &str) -> bool {
     if pattern == "*" {
         return true;
@@ -122,7 +122,7 @@ fn parse_action(action: &str) -> ThreatAction {
     }
 }
 
-/
+/// Engine that caches custom rules from the database and evaluates them.
 pub struct CustomRulesEngine {
     sqlite: Arc<SqliteStore>,
     rules: RwLock<Vec<CachedRule>>,
@@ -142,7 +142,7 @@ impl CustomRulesEngine {
         engine
     }
 
-    /
+    /// Reload rules from the database (called periodically).
     fn reload_rules(&self) {
         match self.sqlite.get_rules() {
             Ok(rows) => {
@@ -164,6 +164,7 @@ impl CustomRulesEngine {
                         enabled: row.enabled,
                     });
                 }
+                // Sort by priority (lower = higher priority)
                 rules.sort_by_key(|r| r.priority);
                 *self.rules.write() = rules;
                 *self.last_reload.write() = Instant::now();
@@ -174,7 +175,7 @@ impl CustomRulesEngine {
         }
     }
 
-    /
+    /// Ensure rules are up-to-date (reload if stale).
     fn ensure_fresh(&self) {
         let elapsed = self.last_reload.read().elapsed();
         if elapsed >= self.reload_interval {
@@ -182,8 +183,8 @@ impl CustomRulesEngine {
         }
     }
 
-    /
-    /
+    /// Evaluate all enabled custom rules against a request.
+    /// Returns the first matching rule's action, or None.
     pub fn check(&self, ctx: &RequestContext) -> Option<(ThreatAction, String)> {
         self.ensure_fresh();
 

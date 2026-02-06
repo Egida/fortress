@@ -5,7 +5,7 @@
 
 use std::net::IpAddr;
 
-/
+/// Cloudflare IPv4 CIDR ranges (as of 2025).
 const CF_IPV4_RANGES: &[(&str, u8)] = &[
     ("173.245.48.0", 20),
     ("103.21.244.0", 22),
@@ -24,7 +24,7 @@ const CF_IPV4_RANGES: &[(&str, u8)] = &[
     ("131.0.72.0", 22),
 ];
 
-/
+/// Check whether an IP address belongs to a known Cloudflare range.
 pub fn is_cloudflare_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -42,15 +42,16 @@ pub fn is_cloudflare_ip(ip: IpAddr) -> bool {
         }
         IpAddr::V6(v6) => {
             let octets = v6.octets();
+            // Check common Cloudflare IPv6 prefixes (first 4 bytes)
             let first4 = [octets[0], octets[1], octets[2], octets[3]];
             matches!(
                 first4,
-                [0x24, 0x00, ..] |
-                [0x26, 0x06, ..] |
-                [0x28, 0x03, ..] |
-                [0x24, 0x05, ..] |
-                [0x2a, 0x06, ..] |
-                [0x2c, 0x0f, ..]
+                [0x24, 0x00, ..] | // 2400:cb00::/32
+                [0x26, 0x06, ..] | // 2606:4700::/32
+                [0x28, 0x03, ..] | // 2803:f800::/32
+                [0x24, 0x05, ..] | // 2405:b500::/32 and 2405:8100::/32
+                [0x2a, 0x06, ..] | // 2a06:98c0::/29
+                [0x2c, 0x0f, ..]   // 2c0f:f248::/32
             )
         }
     }

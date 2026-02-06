@@ -1,3 +1,5 @@
+// Client-side API helpers. All requests go through the Next.js API proxy
+// at /api/fortress/*, which adds the API key server-side.
 
 async function fortressRequest<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {

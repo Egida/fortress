@@ -8,6 +8,7 @@ async function proxyRequest(req: NextRequest, params: Promise<{ path: string[] }
   const fortressPath = '/api/fortress/' + path.join('/');
   const url = new URL(fortressPath, FORTRESS_URL);
 
+  // Forward query params
   req.nextUrl.searchParams.forEach((value, key) => {
     url.searchParams.set(key, value);
   });
@@ -27,6 +28,7 @@ async function proxyRequest(req: NextRequest, params: Promise<{ path: string[] }
       const body = await req.text();
       if (body) fetchOptions.body = body;
     } catch {
+      // no body
     }
   }
 

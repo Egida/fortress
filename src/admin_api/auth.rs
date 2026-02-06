@@ -5,16 +5,16 @@ use axum::{
     response::Response,
 };
 
-/
+/// Holds the expected API key for the admin interface.
 pub struct ApiKeyAuth {
     pub api_key: String,
 }
 
-/
-/
+/// Axum middleware that validates requests carry a valid
+/// `X-Fortress-Key` header before forwarding them to the inner handler.
 ///
-/
-/
+/// The expected key is passed via Axum `State` so it can be shared across
+/// all routes without capturing anything by value.
 pub async fn auth_middleware(
     State(api_key): State<String>,
     req: Request,

@@ -221,7 +221,7 @@ interface DefenseModule {
   nameKey: string;
   descKey: string;
   icon: React.ElementType;
-  configKey: string | null;
+  configKey: string | null;    // null = always on, no toggle
   alwaysOn: boolean;
   badgeFunc?: (settings: FortressSettings | null, managedRulesCount: number) => string | null;
 }
@@ -373,7 +373,7 @@ function BunkerSection({
           <div>
             <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">{title}</h2>
             {classified && (
-              <span className="text-[9px] text-red-500/70 font-mono tracking-widest">CLASSIFIED
+              <span className="text-[9px] text-red-500/70 font-mono tracking-widest">CLASSIFIED // EYES ONLY</span>
             )}
           </div>
         </div>
@@ -569,6 +569,7 @@ export default function SystemConfigurationPage() {
   const [rateLimitMultiplier, setRateLimitMultiplier] = useState('1.0');
   const [challengeDifficulty, setChallengeDifficulty] = useState('medium');
 
+  // Module enabled states (from config)
   const [moduleStates, setModuleStates] = useState<Record<string, boolean>>({
     'ip_reputation.enabled': true,
     'auto_ban.enabled': true,
@@ -598,11 +599,13 @@ export default function SystemConfigurationPage() {
       setRateLimitMultiplier(configData.rate_limit_multiplier ?? '1.0');
       setChallengeDifficulty(configData.challenge_difficulty ?? 'medium');
 
+      // Count active managed rules
       const activeRules = Array.isArray(managedRulesData)
         ? managedRulesData.filter((r) => r.enabled).length
         : 0;
       setManagedRulesCount(activeRules);
 
+      // Parse module states from config. The config object has arbitrary keys.
       const rawConfig = configData as Record<string, string | undefined>;
       const newModuleStates: Record<string, boolean> = {};
       for (const mod of DEFENSE_MODULES) {
@@ -611,6 +614,7 @@ export default function SystemConfigurationPage() {
           newModuleStates[mod.configKey] = val !== undefined ? val === 'true' : true;
         }
       }
+      // Respect settings data for bot_whitelist
       if (settingsData?.bot_whitelist) {
         newModuleStates['bot_whitelist.enabled'] = settingsData.bot_whitelist.enabled;
       }
@@ -672,6 +676,7 @@ export default function SystemConfigurationPage() {
     const newValue = !moduleStates[configKey];
     setTogglingModules((prev) => new Set(prev).add(configKey));
 
+    // Optimistically update
     setModuleStates((prev) => ({ ...prev, [configKey]: newValue }));
 
     try {
@@ -679,6 +684,7 @@ export default function SystemConfigurationPage() {
         key: configKey,
         value: newValue,
       });
+      // Refetch to confirm
       const updatedConfig = await fortressGet<FortressConfig>('/api/fortress/config');
       setConfig(updatedConfig);
       const rawConfig = updatedConfig as Record<string, string | undefined>;
@@ -689,6 +695,7 @@ export default function SystemConfigurationPage() {
       const moduleName = DEFENSE_MODULES.find((m) => m.configKey === configKey);
       showMessage('success', `${moduleName ? t(moduleName.nameKey) : configKey} ${newValue ? 'activated' : 'deactivated'}.`);
     } catch {
+      // Rollback
       setModuleStates((prev) => ({ ...prev, [configKey]: !newValue }));
       showMessage('error', `Failed to toggle module.`);
     } finally {
@@ -1248,7 +1255,7 @@ export default function SystemConfigurationPage() {
         <div className="mt-4 pb-8 text-center">
           <div className="h-px bg-gradient-to-r from-transparent via-zinc-800 to-transparent mb-4" />
           <p className="text-[10px] font-mono text-zinc-700 tracking-wider">
-            FORTRESS THREAT DEFENSE PLATFORM
+            FORTRESS THREAT DEFENSE PLATFORM // SYSTEM CONFIGURATION TERMINAL
           </p>
         </div>
       </div>

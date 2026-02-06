@@ -9,7 +9,7 @@ use tracing::{debug, info, warn};
 use crate::config::settings::L4ProtectionConfig;
 use crate::models::metrics::L4MetricsSnapshot;
 
-/
+/// Action the proxy should take for a new TCP connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum L4Action {
     Allow,
@@ -17,17 +17,17 @@ pub enum L4Action {
     Tarpit,
 }
 
-/
+/// Per-IP tracking state.
 struct IpState {
     concurrent: AtomicU64,
-    /
+    /// Ring of recent connection timestamps (second-granularity).
     recent_connects: std::sync::Mutex<Vec<Instant>>,
 }
 
-/
+/// TCP-level (Layer 4) connection tracker and rate limiter.
 ///
-/
-/
+/// Operates *before* the TLS handshake so it can shed load from
+/// volumetric attacks without wasting CPU on crypto.
 pub struct L4Tracker {
     config: L4ProtectionConfig,
     ip_states: DashMap<IpAddr, IpState>,
@@ -37,7 +37,7 @@ pub struct L4Tracker {
 }
 
 impl L4Tracker {
-    /
+    /// Create a new tracker with the given configuration.
     pub fn new(config: L4ProtectionConfig) -> Self {
         Self {
             config,
@@ -48,7 +48,7 @@ impl L4Tracker {
         }
     }
 
-    /
+    /// Decide whether to allow, drop, or tarpit a new connection from `ip`.
     pub fn check_connection(&self, ip: IpAddr) -> L4Action {
         let state = self.ip_states.entry(ip).or_insert_with(|| IpState {
             concurrent: AtomicU64::new(0),
@@ -57,12 +57,14 @@ impl L4Tracker {
 
         let concurrent = state.concurrent.load(Ordering::Relaxed);
 
+        // Check concurrent connection limit.
         if concurrent >= self.config.max_concurrent_per_ip {
             warn!(client_ip = %ip, concurrent = concurrent, "L4: max concurrent connections exceeded");
             self.total_dropped.fetch_add(1, Ordering::Relaxed);
             return L4Action::Drop;
         }
 
+        // Check connection rate.
         if let Ok(mut recent) = state.recent_connects.lock() {
             let now = Instant::now();
             let one_sec_ago = now - Duration::from_secs(1);
@@ -88,29 +90,30 @@ impl L4Tracker {
         L4Action::Allow
     }
 
-    /
+    /// Register that a connection from `ip` is now active.
     pub fn register_connection(&self, ip: IpAddr) {
         if let Some(state) = self.ip_states.get(&ip) {
             state.concurrent.fetch_add(1, Ordering::Relaxed);
         }
     }
 
-    /
+    /// Unregister that a connection from `ip` has closed.
     pub fn unregister_connection(&self, ip: IpAddr) {
         if let Some(state) = self.ip_states.get(&ip) {
             let prev = state.concurrent.fetch_sub(1, Ordering::Relaxed);
+            // Guard against underflow (shouldn't happen, but be safe).
             if prev == 0 {
                 state.concurrent.store(0, Ordering::Relaxed);
             }
         }
     }
 
-    /
+    /// Return the tarpit delay duration from the config.
     pub fn tarpit_delay(&self) -> Duration {
         Duration::from_millis(self.config.tarpit_delay_ms)
     }
 
-    /
+    /// Get a snapshot of L4 metrics.
     pub fn get_metrics(&self) -> L4MetricsSnapshot {
         L4MetricsSnapshot {
             total_allowed: self.total_allowed.load(Ordering::Relaxed),
@@ -120,8 +123,8 @@ impl L4Tracker {
         }
     }
 
-    /
-    /
+    /// Remove IP entries that have zero concurrent connections and no recent
+    /// activity. Called periodically from the cleanup loop.
     pub fn cleanup(&self) {
         let before = self.ip_states.len();
         self.ip_states.retain(|_ip, state| {

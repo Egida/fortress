@@ -50,6 +50,7 @@ export default function Sidebar() {
           }
         }
       } catch {
+        // Silently handle - status will update on next poll
       }
     };
     fetchStatus();

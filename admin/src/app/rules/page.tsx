@@ -41,14 +41,17 @@ export default function RulesPage() {
   const [rules, setRules] = useState<ProtectionRule[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Add form
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState<RuleFormState>({ ...emptyForm });
   const [addError, setAddError] = useState('');
 
+  // Edit form
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<RuleFormState>({ ...emptyForm });
   const [editError, setEditError] = useState('');
 
+  // --------------- Styles ---------------
   const inputClass =
     'bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full focus:outline-none focus:border-zinc-500 transition-colors';
 
@@ -61,6 +64,7 @@ export default function RulesPage() {
   const thClass = 'text-left text-xs font-medium text-zinc-400 uppercase tracking-wider px-4 py-3';
   const tdClass = 'px-4 py-3 text-sm text-zinc-300';
 
+  // --------------- Fetch ---------------
   const fetchRules = useCallback(async () => {
     setLoading(true);
     try {
@@ -77,6 +81,7 @@ export default function RulesPage() {
     fetchRules();
   }, [fetchRules]);
 
+  // --------------- Create ---------------
   const createRule = async () => {
     setAddError('');
     if (!addForm.name.trim()) {
@@ -108,6 +113,7 @@ export default function RulesPage() {
     }
   };
 
+  // --------------- Update ---------------
   const startEdit = (rule: ProtectionRule) => {
     setEditingId(rule.id);
     setEditError('');
@@ -157,6 +163,7 @@ export default function RulesPage() {
     }
   };
 
+  // --------------- Toggle enabled ---------------
   const toggleEnabled = async (rule: ProtectionRule) => {
     try {
       let parsedConditions: unknown;
@@ -179,6 +186,7 @@ export default function RulesPage() {
     }
   };
 
+  // --------------- Delete ---------------
   const deleteRule = async (id: number) => {
     if (!confirm('Are you sure you want to delete this rule? This action cannot be undone.')) return;
     try {
@@ -189,6 +197,7 @@ export default function RulesPage() {
     }
   };
 
+  // --------------- Helpers ---------------
   const formatConditions = (json: string): string => {
     try {
       return JSON.stringify(JSON.parse(json), null, 2);
@@ -206,6 +215,7 @@ export default function RulesPage() {
     );
   };
 
+  // --------------- Render ---------------
   return (
     <div className="min-h-screen bg-black text-zinc-100 p-6 space-y-6">
       {/* Header */}

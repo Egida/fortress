@@ -105,9 +105,11 @@ function parseJsonField(
     if (Array.isArray(parsed)) {
       return parsed
         .map((item) => {
+          // Handle tuple arrays from Rust: ["US", 100] or ["1.2.3.4", 500]
           if (Array.isArray(item) && item.length >= 2) {
             return { label: String(item[0]), value: Number(item[1]) };
           }
+          // Handle object arrays: {country: "US", count: 100}
           if (typeof item === 'object' && item !== null) {
             return {
               label:

@@ -109,6 +109,7 @@ export default function ServiceDetailPage() {
         `/api/fortress/services/${id}`,
         payload
       );
+      // Refetch to get the latest data
       const refreshed = await fortressGet<ServiceConfig>(`/api/fortress/services/${id}`);
       setService(refreshed);
       setFormData(serviceToForm(refreshed));

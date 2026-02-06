@@ -3,11 +3,11 @@ use tracing::debug;
 use crate::models::request::RequestContext;
 use crate::models::threat::ThreatReason;
 
-/
+/// HTTP header validation and anomaly detection.
 ///
-/
-/
-/
+/// Analyzes request headers for signs of automated attack tools,
+/// misconfigured clients, or intentional evasion. Legitimate automation
+/// tools (curl, python-requests, etc.) are NOT penalized.
 pub struct HeaderAnalyzer {}
 
 impl HeaderAnalyzer {
@@ -15,11 +15,12 @@ impl HeaderAnalyzer {
         Self {}
     }
 
-    /
+    /// Analyze request headers for anomalies.
     pub fn analyze(&self, ctx: &RequestContext) -> (f64, Option<ThreatReason>) {
         let mut score: f64 = 0.0;
         let mut primary_reason: Option<ThreatReason> = None;
 
+        // Check 1: Missing Host header
         if ctx.host.is_empty() {
             debug!(ip = %ctx.client_ip, "Missing Host header");
             score += 20.0;
@@ -28,6 +29,7 @@ impl HeaderAnalyzer {
             }
         }
 
+        // Check 2: Missing or empty User-Agent (reduced penalty for API clients)
         match &ctx.user_agent {
             None => {
                 debug!(ip = %ctx.client_ip, "Missing User-Agent header");
@@ -46,22 +48,26 @@ impl HeaderAnalyzer {
             _ => {}
         }
 
+        // Determine if UA claims to be a browser for checks 3-4
         let is_browser_ua = ctx
             .user_agent
             .as_ref()
             .map(|ua| self.is_browser_user_agent(ua))
             .unwrap_or(false);
 
+        // Check 3: Missing Accept header on browser requests ONLY
         if is_browser_ua && !ctx.headers.contains_key("accept") {
             debug!(ip = %ctx.client_ip, "Browser UA but missing Accept header");
             score += 15.0;
         }
 
+        // Check 4: Missing Accept-Language on browser requests ONLY
         if is_browser_ua && !ctx.headers.contains_key("accept-language") {
             debug!(ip = %ctx.client_ip, "Browser UA but missing Accept-Language header");
             score += 15.0;
         }
 
+        // Check 5: Impossible header combinations
         if self.has_impossible_headers(ctx) {
             debug!(ip = %ctx.client_ip, "Impossible header combination detected");
             score += 30.0;
@@ -70,6 +76,7 @@ impl HeaderAnalyzer {
             }
         }
 
+        // Check 6: Known ATTACK tool user agents (NOT legitimate tools)
         if let Some(ref ua) = ctx.user_agent {
             if let Some((tool, is_attack)) = self.detect_known_bot_ua(ua) {
                 if is_attack {
@@ -84,6 +91,7 @@ impl HeaderAnalyzer {
             }
         }
 
+        // Check 7: Very long or malformed headers
         if self.has_malformed_headers(ctx) {
             debug!(ip = %ctx.client_ip, "Malformed or excessively long headers");
             score += 20.0;
@@ -92,6 +100,7 @@ impl HeaderAnalyzer {
             }
         }
 
+        // Check 8: Transfer-Encoding + Content-Length (request smuggling)
         if ctx.headers.contains_key("transfer-encoding") && ctx.headers.contains_key("content-length") {
             debug!(ip = %ctx.client_ip, "Duplicate Content-Length / Transfer-Encoding (smuggling indicator)");
             score += 50.0;
@@ -120,11 +129,12 @@ impl HeaderAnalyzer {
                 || lower.contains("safari"))
     }
 
-    /
-    /
+    /// Returns (tool_name, is_attack_tool).
+    /// Attack tools get +40 score. Legitimate tools get +0.
     fn detect_known_bot_ua(&self, ua: &str) -> Option<(&'static str, bool)> {
         let lower = ua.to_lowercase();
 
+        // Attack / scanning tools — high score
         if lower.contains("nikto") { return Some(("nikto", true)); }
         if lower.contains("sqlmap") { return Some(("sqlmap", true)); }
         if lower.contains("nmap") || lower.contains("masscan") { return Some(("nmap/masscan", true)); }
@@ -137,6 +147,7 @@ impl HeaderAnalyzer {
             return Some(("slowhttp-tool", true));
         }
 
+        // Legitimate automation tools — NO penalty
         if lower.starts_with("python-requests") || lower.starts_with("python-urllib") {
             return Some(("python-requests", false));
         }

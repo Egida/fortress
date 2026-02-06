@@ -2,6 +2,7 @@ export type Locale = 'en' | 'tr';
 
 export const translations: Record<Locale, Record<string, string>> = {
   en: {
+    // Navigation
     'nav.command_center': 'Command Center',
     'nav.attack_monitor': 'Attack Monitor',
     'nav.services': 'Protected Services',
@@ -19,6 +20,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'nav.l4': 'L4 TCP Shield',
     'nav.disconnect': 'Disconnect',
 
+    // Common
     'common.loading': 'Loading...',
     'common.save': 'Save Changes',
     'common.cancel': 'Cancel',
@@ -52,12 +54,14 @@ export const translations: Record<Locale, Record<string, string>> = {
     'common.no_data': 'No data available',
     'common.error': 'An error occurred',
 
+    // Protection Levels (DEFCON)
     'level.defcon5': 'DEFCON 5 - Passive Monitoring',
     'level.defcon4': 'DEFCON 4 - Active Defense',
     'level.defcon3': 'DEFCON 3 - Threat Engagement',
     'level.defcon2': 'DEFCON 2 - Maximum Defense',
     'level.defcon1': 'DEFCON 1 - Full Lockdown',
 
+    // Dashboard
     'dashboard.title': 'Command Center',
     'dashboard.subtitle': 'Real-time threat defense operations overview',
     'dashboard.threat_posture': 'Threat Posture',
@@ -70,6 +74,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'dashboard.active_defenses': 'Active Defense Systems',
     'dashboard.traffic_overview': 'Traffic Overview',
 
+    // Attack Monitor
     'monitor.title': 'Attack Monitor',
     'monitor.subtitle': 'Real-time threat detection and incident response',
     'monitor.all_clear': 'ALL SYSTEMS NOMINAL',
@@ -90,6 +95,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'monitor.alerts_off': 'Alerts OFF',
     'monitor.nominal': 'NOMINAL',
 
+    // Settings
     'settings.title': 'System Configuration',
     'settings.subtitle': 'Core defense parameters and protection modules',
     'settings.protection_level': 'Protection Level',
@@ -98,6 +104,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'settings.system_info': 'System Information',
     'settings.advanced': 'Advanced Configuration',
 
+    // Protection Modules
     'module.rate_limiter': 'Rate Limiter',
     'module.rate_limiter_desc': 'Sliding window rate limiting per IP, subnet, ASN, and country',
     'module.ja3_fingerprint': 'JA3 Fingerprint Engine',
@@ -123,12 +130,31 @@ export const translations: Record<Locale, Record<string, string>> = {
     'module.l4': 'L4 TCP Protection',
     'module.l4_desc': 'Kernel-level SYN flood and connection rate protection',
 
+    // Services
     'services.title': 'Protected Services',
     'services.add': 'Register Service',
     'services.domains': 'Domains',
     'services.upstream': 'Upstream Address',
     'services.deploy': 'Deploy Service',
 
+    // Quick Response
+    'qr.title': 'Quick Response',
+    'qr.subtitle': 'Instant protection level switching',
+    'qr.current': 'CURRENT',
+    'qr.switch_confirm': 'Switch to',
+    'qr.switching': 'Switching...',
+    'qr.panic': 'PANIC MODE',
+    'qr.panic_desc': 'Immediately activate DEFCON 1 - Full Lockdown',
+    'qr.reset': 'RESET',
+    'qr.reset_desc': 'Return to DEFCON 5 - Normal monitoring',
+    'qr.auto': 'AUTO',
+    'qr.auto_desc': 'Let Fortress decide the protection level automatically',
+    'qr.auto_enabled': 'Auto-escalation is active',
+    'qr.auto_disabled': 'Auto-escalation is disabled',
+    'qr.success': 'Protection level changed successfully',
+    'qr.error': 'Failed to change protection level',
+
+    // Login
     'login.title': 'FORTRESS',
     'login.subtitle': 'Threat Defense Platform',
     'login.credential': 'Access Credential',
@@ -136,6 +162,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'login.failed': 'Authentication failed',
   },
   tr: {
+    // Navigation
     'nav.command_center': 'Komuta Merkezi',
     'nav.attack_monitor': 'Saldiri Monitoru',
     'nav.services': 'Korumali Servisler',
@@ -153,6 +180,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'nav.l4': 'L4 TCP Kalkani',
     'nav.disconnect': 'Cikis Yap',
 
+    // Common
     'common.loading': 'Yukleniyor...',
     'common.save': 'Degisiklikleri Kaydet',
     'common.cancel': 'Iptal',
@@ -186,12 +214,14 @@ export const translations: Record<Locale, Record<string, string>> = {
     'common.no_data': 'Veri bulunamadi',
     'common.error': 'Bir hata olustu',
 
+    // Protection Levels (DEFCON)
     'level.defcon5': 'DEFCON 5 - Pasif Izleme',
     'level.defcon4': 'DEFCON 4 - Aktif Savunma',
     'level.defcon3': 'DEFCON 3 - Tehdit Mukavelesi',
     'level.defcon2': 'DEFCON 2 - Maksimum Savunma',
     'level.defcon1': 'DEFCON 1 - Tam Kilit',
 
+    // Dashboard
     'dashboard.title': 'Komuta Merkezi',
     'dashboard.subtitle': 'Anlik tehdit savunma operasyonlari',
     'dashboard.threat_posture': 'Tehdit Durusu',
@@ -204,6 +234,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'dashboard.active_defenses': 'Aktif Savunma Sistemleri',
     'dashboard.traffic_overview': 'Trafik Genel Bakis',
 
+    // Attack Monitor
     'monitor.title': 'Saldiri Monitoru',
     'monitor.subtitle': 'Anlik tehdit algilama ve olay mudahalesi',
     'monitor.all_clear': 'TUM SISTEMLER NORMAL',
@@ -224,6 +255,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'monitor.alerts_off': 'Uyarilar KAPALI',
     'monitor.nominal': 'NORMAL',
 
+    // Settings
     'settings.title': 'Sistem Yapilandirmasi',
     'settings.subtitle': 'Cekirdek savunma parametreleri ve koruma modulleri',
     'settings.protection_level': 'Koruma Seviyesi',
@@ -232,6 +264,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'settings.system_info': 'Sistem Bilgileri',
     'settings.advanced': 'Gelismis Yapilandirma',
 
+    // Protection Modules
     'module.rate_limiter': 'Hiz Sinirlandirici',
     'module.rate_limiter_desc': 'IP, altag, ASN ve ulke bazli kayan pencere hiz sinirlamasi',
     'module.ja3_fingerprint': 'JA3 Parmak Izi Motoru',
@@ -257,12 +290,31 @@ export const translations: Record<Locale, Record<string, string>> = {
     'module.l4': 'L4 TCP Korumasi',
     'module.l4_desc': 'Cekirdek seviyesi SYN flood ve baglanti hizi korumasi',
 
+    // Services
     'services.title': 'Korumali Servisler',
     'services.add': 'Servis Kaydet',
     'services.domains': 'Alan Adlari',
     'services.upstream': 'Upstream Adresi',
     'services.deploy': 'Servisi Devreye Al',
 
+    // Quick Response
+    'qr.title': 'Hizli Mudahale',
+    'qr.subtitle': 'Anlik koruma seviyesi degistirme',
+    'qr.current': 'AKTIF',
+    'qr.switch_confirm': 'Gecis yap:',
+    'qr.switching': 'Degistiriliyor...',
+    'qr.panic': 'PANIK MODU',
+    'qr.panic_desc': 'Hemen DEFCON 1 - Tam Kilitlemeyi etkinlestir',
+    'qr.reset': 'SIFIRLA',
+    'qr.reset_desc': 'DEFCON 5 - Normal izlemeye don',
+    'qr.auto': 'OTOMATIK',
+    'qr.auto_desc': 'Fortress koruma seviyesini otomatik belirlesin',
+    'qr.auto_enabled': 'Otomatik eskalasyon aktif',
+    'qr.auto_disabled': 'Otomatik eskalasyon devre disi',
+    'qr.success': 'Koruma seviyesi basariyla degistirildi',
+    'qr.error': 'Koruma seviyesi degistirilemedi',
+
+    // Login
     'login.title': 'FORTRESS',
     'login.subtitle': 'Tehdit Savunma Platformu',
     'login.credential': 'Erisim Anahtari',
@@ -271,6 +323,7 @@ export const translations: Record<Locale, Record<string, string>> = {
   },
 };
 
+// Get stored locale or default to English
 export function getStoredLocale(): Locale {
   if (typeof window === 'undefined') return 'en';
   return (localStorage.getItem('fortress_locale') as Locale) || 'en';
@@ -282,10 +335,12 @@ export function setStoredLocale(locale: Locale): void {
   }
 }
 
+// Translation function
 export function t(key: string, locale: Locale): string {
   return translations[locale][key] || translations.en[key] || key;
 }
 
+// Country code to flag emoji
 export function countryFlag(code: string | undefined): string {
   if (!code || code.length !== 2) return '';
   const upper = code.toUpperCase();
@@ -294,6 +349,7 @@ export function countryFlag(code: string | undefined): string {
   return String.fromCodePoint(cp1, cp2);
 }
 
+// Country code to full name
 export function countryName(code: string, locale: Locale = 'en'): string {
   try {
     const displayNames = new Intl.DisplayNames([locale === 'tr' ? 'tr' : 'en'], { type: 'region' });

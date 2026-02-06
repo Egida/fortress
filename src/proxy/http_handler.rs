@@ -23,16 +23,16 @@ use crate::storage::memory::MemoryStore;
 use super::access_log::AccessLogger;
 use super::connection::ConnectionTracker;
 
-/
+/// Core HTTP request handler for the Fortress reverse proxy.
 ///
-/
+/// For every incoming request the handler:
 ///
-/
-/
-/
-/
-/
-/
+/// 1. Extracts metadata (IP, host, path, headers, JA3, ...).
+/// 2. Constructs a [`RequestContext`].
+/// 3. Runs the [`ProtectionPipeline`].
+/// 4. Forwards legitimate traffic to the upstream backend or returns a
+///    block / challenge response.
+/// 5. Records the outcome in the [`MetricsCollector`].
 pub struct HttpHandler {
     pipeline: Arc<ProtectionPipeline>,
     service_router: Arc<ServiceRouter>,
@@ -47,7 +47,7 @@ pub struct HttpHandler {
 }
 
 impl HttpHandler {
-    /
+    /// Create a new handler.
     pub fn new(
         pipeline: Arc<ProtectionPipeline>,
         service_router: Arc<ServiceRouter>,
@@ -62,6 +62,7 @@ impl HttpHandler {
             .pool_max_idle_per_host(128)
             .build_http();
 
+        // Initialise the per-request access logger (best-effort).
         let access_log = if !settings.logging.access_log.is_empty() {
             match AccessLogger::new(&settings.logging.access_log) {
                 Ok(logger) => {
@@ -90,7 +91,7 @@ impl HttpHandler {
         }
     }
 
-    /
+    /// Process a single inbound HTTP request end-to-end.
     pub async fn handle(
         &self,
         req: Request<Incoming>,
@@ -100,8 +101,10 @@ impl HttpHandler {
     ) -> Response<Full<Bytes>> {
         let start = std::time::Instant::now();
 
+        // Track the request.
         self.connections.increment_requests(conn_id);
 
+        // --- Extract request metadata ---
         let method = req.method().to_string();
         let path = req.uri().path().to_string();
         let query_string = req.uri().query().map(|q| q.to_string());
@@ -112,10 +115,12 @@ impl HttpHandler {
             .unwrap_or("")
             .to_string();
 
+        // Associate host with the connection for observability.
         if !host.is_empty() {
             self.connections.set_host(conn_id, host.clone());
         }
 
+        // Resolve service from Host header
         let resolved_service = self.service_router.resolve(&host);
         let upstream_addr = match &resolved_service {
             Some(svc) if svc.enabled => svc.upstream_address.clone(),
@@ -144,6 +149,7 @@ impl HttpHandler {
             "Incoming request"
         );
 
+        // --- Internal endpoints ---
         if path == "/__fortress/nojs-verify" {
             let query = req.uri().query().unwrap_or("").to_string();
             return self.handle_nojs_verification(&query, real_ip);
@@ -154,6 +160,7 @@ impl HttpHandler {
             return self.handle_challenge_verification(&query, real_ip);
         }
 
+        // --- Collect headers as HashMap ---
         let headers: HashMap<String, String> = req
             .headers()
             .iter()
@@ -165,6 +172,7 @@ impl HttpHandler {
             })
             .collect();
 
+        // CORS preflight requests bypass protection
         if method == "OPTIONS" {
             debug!(client_ip = %real_ip, path = %path, "CORS preflight - bypassing protection");
             return self.forward_to_backend(
@@ -179,6 +187,7 @@ impl HttpHandler {
             ).await;
         }
 
+        // --- Build RequestContext ---
         let mut ctx = RequestContext::new(real_ip, method.clone(), path.clone(), host.clone());
         ctx.is_behind_cloudflare = self.settings.cloudflare.enabled && crate::protection::cloudflare::is_cloudflare_ip(client_ip);
         ctx.ja3_hash = ja3_hash.clone();
@@ -189,6 +198,7 @@ impl HttpHandler {
         };
         ctx.headers = headers.clone();
 
+        // Use Cloudflare's country header when available (more accurate than GeoIP for CF traffic)
         if ctx.is_behind_cloudflare {
             if let Some(cf_country) = headers.get("cf-ipcountry") {
                 if cf_country.len() == 2 && cf_country != "XX" {
@@ -197,8 +207,10 @@ impl HttpHandler {
             }
         }
 
+        // --- Run protection pipeline (NOT async) ---
         let pipeline_result = self.pipeline.process(&mut ctx, &self.settings, resolved_service.as_deref());
 
+        // --- Consume the request body ---
         let body_bytes = match req.into_body().collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(err) => {
@@ -207,6 +219,7 @@ impl HttpHandler {
             }
         };
 
+        // Generate a unique ray ID for this request
         let ray_id = format!(
             "{:016x}",
             std::time::SystemTime::now()
@@ -216,6 +229,7 @@ impl HttpHandler {
                 ^ (conn_id << 32)
         );
 
+        // --- Act on pipeline result ---
         let response = match pipeline_result.action {
             ThreatAction::Pass => {
                 debug!(client_ip = %real_ip, "Request passed protection pipeline");
@@ -233,6 +247,7 @@ impl HttpHandler {
             }
             ThreatAction::Challenge => {
                 info!(client_ip = %real_ip, path = %path, "Challenge issued");
+                // Detect API/webhook requests - return JSON instead of HTML challenge
                 let is_api = is_api_request(&path, &headers);
                 if is_api {
                     info!(client_ip = %real_ip, path = %path, "API request challenged - returning JSON 403");
@@ -277,11 +292,13 @@ impl HttpHandler {
             }
             ThreatAction::Tarpit => {
                 info!(client_ip = %real_ip, path = %path, ray_id = %ray_id, "Request tarpitted");
+                // Sleep before responding to waste the attacker's resources
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 forbidden_with_details(real_ip, &ray_id)
             }
         };
 
+        // --- Metrics ---
         let elapsed = start.elapsed();
         let elapsed_us = elapsed.as_micros() as u64;
         let action_str = match pipeline_result.action {
@@ -298,10 +315,12 @@ impl HttpHandler {
             elapsed_us,
         );
 
+        // Track bytes (approximate).
         let resp_size = body_bytes.len() as u64;
         self.connections
             .update_bytes(conn_id, resp_size, body_bytes.len() as u64);
 
+        // --- Access log ---
         if let Some(ref logger) = self.access_log {
             logger.log(
                 real_ip,
@@ -320,6 +339,9 @@ impl HttpHandler {
         response
     }
 
+    // -----------------------------------------------------------------------
+    // Challenge verification
+    // -----------------------------------------------------------------------
 
     fn handle_challenge_verification(
         &self,
@@ -365,6 +387,7 @@ impl HttpHandler {
             }
         };
 
+        // Verify the PoW solution
         if !self.challenge.verify_solution(&challenge, &nonce) {
             warn!(client_ip = %client_ip, "Challenge verification: invalid PoW solution");
             return Response::builder()
@@ -374,6 +397,7 @@ impl HttpHandler {
                 .unwrap();
         }
 
+        // Headless browser detection check
         if hl_score >= 40 {
             warn!(client_ip = %client_ip, hl_score = hl_score, "Challenge verification: headless browser detected");
             return Response::builder()
@@ -383,16 +407,19 @@ impl HttpHandler {
                 .unwrap();
         }
 
+        // Generate signed clearance cookie
         let cookie = self.challenge.generate_clearance_cookie(&client_ip);
 
         info!(client_ip = %client_ip, "Challenge verified, clearance cookie issued");
 
+        // Sanitize redirect path (must start with "/" and not contain "//")
         let safe_redirect = if redirect.starts_with('/') && !redirect.starts_with("//") {
             redirect
         } else {
             "/".to_string()
         };
 
+        // 302 redirect with Set-Cookie
         Response::builder()
             .status(StatusCode::FOUND)
             .header("Location", &safe_redirect)
@@ -404,6 +431,9 @@ impl HttpHandler {
     }
 
 
+    // -----------------------------------------------------------------------
+    // Non-JavaScript challenge verification (meta-refresh fallback)
+    // -----------------------------------------------------------------------
 
     fn handle_nojs_verification(
         &self,
@@ -442,6 +472,7 @@ impl HttpHandler {
             }
         };
 
+        // Verify token and signature
         if !self.challenge.verify_nojs_token(&token, &sig) {
             warn!(client_ip = %client_ip, "Nojs verification: invalid token or signature");
             return Response::builder()
@@ -450,6 +481,7 @@ impl HttpHandler {
                 .unwrap();
         }
 
+        // Issue clearance cookie and redirect to homepage
         let cookie = self.challenge.generate_clearance_cookie(&client_ip);
 
         info!(client_ip = %client_ip, "Nojs challenge verified, clearance cookie issued");
@@ -464,6 +496,9 @@ impl HttpHandler {
             .unwrap()
     }
 
+    // -----------------------------------------------------------------------
+    // Backend forwarding (connection-pooled via hyper client)
+    // -----------------------------------------------------------------------
 
     async fn forward_to_backend(
         &self,
@@ -491,11 +526,14 @@ impl HttpHandler {
 
         let mut builder = Request::builder().method(parsed_method).uri(&uri);
 
+        // Set required headers
         builder = builder.header("Host", host);
         builder = builder.header("X-Forwarded-For", client_ip.to_string());
         builder = builder.header("X-Real-IP", client_ip.to_string());
         builder = builder.header("X-Fortress-Protected", "true");
 
+        // Forward original headers, skipping hop-by-hop, headers we override,
+        // and Cloudflare-injected headers that confuse backend apps.
         let skip_headers: &[&str] = &[
             "host",
             "x-forwarded-for",
@@ -505,6 +543,7 @@ impl HttpHandler {
             "x-forwarded-port",
             "transfer-encoding",
             "connection",
+            // Cloudflare-specific headers – already consumed by Fortress
             "cf-connecting-ip",
             "cf-ipcountry",
             "cf-ray",
@@ -538,6 +577,7 @@ impl HttpHandler {
             }
         };
 
+        // Convert Response<Incoming> to Response<Full<Bytes>>
         let (parts, incoming_body) = upstream_resp.into_parts();
         let body_bytes = match incoming_body.collect().await {
             Ok(collected) => collected.to_bytes(),
@@ -551,8 +591,11 @@ impl HttpHandler {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Canned responses
+// ---------------------------------------------------------------------------
 
-/
+/// Return a `502 Bad Gateway` response.
 pub fn bad_gateway() -> Response<Full<Bytes>> {
     Response::builder()
         .status(StatusCode::BAD_GATEWAY)
@@ -568,7 +611,7 @@ pub fn bad_gateway() -> Response<Full<Bytes>> {
         .unwrap()
 }
 
-/
+/// Return a `403 Forbidden` response with a professional block page.
 pub fn forbidden_with_details(client_ip: IpAddr, ray_id: &str) -> Response<Full<Bytes>> {
     let html = format!(
         r##"<!DOCTYPE html>
@@ -637,7 +680,7 @@ body{{background:#0a0a0a;color:#e4e4e7;font-family:-apple-system,system-ui,Blink
         .unwrap()
 }
 
-/
+/// Simple 403 without details (for internal use).
 pub fn forbidden() -> Response<Full<Bytes>> {
     Response::builder()
         .status(StatusCode::FORBIDDEN)
@@ -647,17 +690,22 @@ pub fn forbidden() -> Response<Full<Bytes>> {
         .unwrap()
 }
 
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
-/
-/
+/// Determine the true client IP from proxy headers, falling back to the
+/// directly-connected peer address.
 ///
-/
-/
-/
+/// When Cloudflare mode is active, headers are only trusted if the peer IP
+/// belongs to a known Cloudflare range. `CF-Connecting-IP` takes highest
+/// priority in that case.
 pub fn extract_client_ip(req: &Request<Incoming>, peer_addr: IpAddr, cf_enabled: bool) -> IpAddr {
+    // When Cloudflare mode is enabled, only trust headers from CF IPs.
     let trusted_proxy = cf_enabled && crate::protection::cloudflare::is_cloudflare_ip(peer_addr);
 
     if trusted_proxy {
+        // CF-Connecting-IP is the most reliable header from Cloudflare.
         if let Some(cf_ip) = req.headers().get("cf-connecting-ip") {
             if let Ok(val) = cf_ip.to_str() {
                 if let Ok(ip) = val.trim().parse::<IpAddr>() {
@@ -668,6 +716,7 @@ pub fn extract_client_ip(req: &Request<Incoming>, peer_addr: IpAddr, cf_enabled:
     }
 
     if trusted_proxy {
+        // X-Real-IP (trusted proxy scenario).
         if let Some(real_ip) = req.headers().get("x-real-ip") {
             if let Ok(val) = real_ip.to_str() {
                 if let Ok(ip) = val.trim().parse::<IpAddr>() {
@@ -676,6 +725,7 @@ pub fn extract_client_ip(req: &Request<Incoming>, peer_addr: IpAddr, cf_enabled:
             }
         }
 
+        // X-Forwarded-For left-most entry.
         if let Some(xff) = req.headers().get("x-forwarded-for") {
             if let Ok(val) = xff.to_str() {
                 if let Some(first) = val.split(',').next() {
@@ -690,7 +740,7 @@ pub fn extract_client_ip(req: &Request<Incoming>, peer_addr: IpAddr, cf_enabled:
     peer_addr
 }
 
-/
+/// Simple percent-decoding for URL query parameters.
 fn url_decode(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.bytes();
@@ -717,11 +767,12 @@ fn url_decode(input: &str) -> String {
     result
 }
 
-/
-/
+/// Detect API, webhook, and non-browser requests that should receive JSON errors
+/// instead of HTML challenge pages.
 fn is_api_request(path: &str, headers: &HashMap<String, String>) -> bool {
     let p = path.to_lowercase();
 
+    // Path-based detection
     if p.starts_with("/api/")
         || p.starts_with("/webhook")
         || p.starts_with("/graphql")
@@ -733,6 +784,7 @@ fn is_api_request(path: &str, headers: &HashMap<String, String>) -> bool {
         return true;
     }
 
+    // Accept header detection
     if let Some(accept) = headers.get("accept") {
         let a = accept.to_lowercase();
         if a.contains("application/json") && !a.contains("text/html") {
@@ -740,6 +792,7 @@ fn is_api_request(path: &str, headers: &HashMap<String, String>) -> bool {
         }
     }
 
+    // Content-Type detection (POST with JSON body)
     if let Some(ct) = headers.get("content-type") {
         let c = ct.to_lowercase();
         if c.contains("application/json") || c.contains("application/graphql") {
@@ -747,6 +800,7 @@ fn is_api_request(path: &str, headers: &HashMap<String, String>) -> bool {
         }
     }
 
+    // Common webhook/API user agents
     if let Some(ua) = headers.get("user-agent") {
         let u = ua.to_lowercase();
         if u.starts_with("stripe/")

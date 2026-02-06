@@ -85,6 +85,7 @@ export default function AutoBansPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedIp, setExpandedIp] = useState<string | null>(null);
 
+  // Manual containment form state
   const [banIp, setBanIp] = useState("");
   const [banReason, setBanReason] = useState("");
   const [banDuration, setBanDuration] = useState<number>(DURATION_OPTIONS[0].value);
@@ -186,6 +187,7 @@ export default function AutoBansPage() {
         )
       : 0;
 
+  // Count unique countries
   const uniqueCountries = new Set(bans.map((b) => b.country).filter(Boolean)).size;
 
   /* ---- Skeleton loading ---- */

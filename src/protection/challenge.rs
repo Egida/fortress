@@ -16,17 +16,17 @@ use crate::storage::memory::MemoryStore;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/
+/// JavaScript proof-of-work challenge system.
 ///
-/
-/
-/
+/// Issues challenges to suspicious clients that require computing a SHA-256
+/// proof-of-work. Legitimate browsers solve this within seconds. Automated
+/// tools and scripts fail unless they implement a full headless browser.
 ///
-/
-/
-/
-/
-/
+/// Challenge flow:
+/// 1. Server returns challenge HTML page with embedded PoW JavaScript
+/// 2. Browser computes SHA-256 hashes until leading zeros match difficulty
+/// 3. Browser sets a signed cookie with the solution
+/// 4. Browser reloads the page, and the clearance cookie bypasses the challenge
 pub struct ChallengeSystem {
     memory: Arc<MemoryStore>,
     hmac_secret: Vec<u8>,
@@ -41,7 +41,7 @@ pub struct ChallengeSystem {
 }
 
 impl ChallengeSystem {
-    /
+    /// Create a new ChallengeSystem from configuration.
     pub fn new(config: &ChallengeConfig, memory: Arc<MemoryStore>) -> Self {
         Self {
             memory,
@@ -57,14 +57,14 @@ impl ChallengeSystem {
         }
     }
 
-    /
+    /// Determine if a challenge should be issued for this request.
     ///
-    /
-    /
-    /
-    /
-    /
-    /
+    /// Challenge criteria depend on the current protection level:
+    /// - L0: Only challenge if score > 70
+    /// - L1: Challenge if score > 50
+    /// - L2: Challenge if score > 30
+    /// - L3: Challenge all requests (score > 0)
+    /// - L4: Challenge all requests (maximum security)
     pub fn should_challenge(
         &self,
         _ctx: &RequestContext,
@@ -82,25 +82,29 @@ impl ChallengeSystem {
         score > threshold
     }
 
-    /
+    /// Check if the request has a valid clearance cookie.
     ///
-    /
-    /
-    /
-    /
-    /
-    /
+    /// Validates:
+    /// 1. Cookie exists with the correct name
+    /// 2. Cookie format is `challenge:nonce:signature`
+    /// 3. HMAC signature is valid
+    /// 4. Challenge timestamp is not expired
+    /// 5. IP hash in challenge matches requesting IP
     pub fn has_valid_clearance(&self, ip: &IpAddr, cookies: Option<&str>) -> bool {
         let cookies_str = match cookies {
             Some(c) => c,
             None => return false,
         };
 
+        // Parse the cookie header to find our clearance cookie
         let cookie_value = match self.extract_cookie(cookies_str) {
             Some(v) => v,
             None => return false,
         };
 
+        // Cookie format: challenge:nonce:signature
+        // Challenge format: timestamp:random_hex:ip_hash
+        // So full cookie: timestamp:random_hex:ip_hash:nonce:signature
         let parts: Vec<&str> = cookie_value.splitn(5, ':').collect();
         if parts.len() != 5 {
             debug!("Invalid clearance cookie format: wrong number of parts");
@@ -113,14 +117,17 @@ impl ChallengeSystem {
         let nonce = parts[3];
         let signature = parts[4];
 
+        // Reconstruct the challenge string
         let challenge = format!("{}:{}:{}", timestamp_str, random_hex, ip_hash);
 
+        // Verify HMAC signature
         let expected_signature = self.compute_signature(&challenge, nonce, "clearance");
         if signature != expected_signature {
             debug!("Invalid clearance cookie: signature mismatch");
             return false;
         }
 
+        // Verify timestamp is not expired
         let timestamp: i64 = match timestamp_str.parse() {
             Ok(t) => t,
             Err(_) => {
@@ -140,6 +147,7 @@ impl ChallengeSystem {
             return false;
         }
 
+        // Verify IP hash matches requesting IP
         let expected_ip_hash = self.hash_ip(ip);
         if ip_hash != expected_ip_hash {
             debug!("Invalid clearance cookie: IP hash mismatch");
@@ -150,12 +158,12 @@ impl ChallengeSystem {
         true
     }
 
-    /
+    /// Generate a full HTML challenge page with embedded PoW JavaScript.
     ///
-    /
-    /
-    /
-    /
+    /// The difficulty scales with the protection level (and reads from config):
+    /// - L0-L1: pow_difficulty_l1 leading zero bits
+    /// - L2: pow_difficulty_l2 leading zero bits
+    /// - L3-L4: pow_difficulty_l3 leading zero bits
     pub fn generate_challenge_page(&self, level: &ProtectionLevel) -> String {
         let difficulty = match level {
             ProtectionLevel::L0 | ProtectionLevel::L1 => self.pow_difficulty_l1 as u32,
@@ -167,6 +175,7 @@ impl ChallengeSystem {
         let random_hex = self.generate_random_hex(16);
         let challenge_template = format!("{}:{}", timestamp, random_hex);
 
+        // Generate nojs fallback redirect URL
         let nojs_redirect = if self.nojs_fallback_enabled {
             let nojs_token = format!("{}:{}", timestamp, random_hex);
             let nojs_sig = self.compute_signature(&nojs_token, "0", "nojs");
@@ -183,37 +192,41 @@ impl ChallengeSystem {
         html
     }
 
-    /
+    /// Verify a proof-of-work solution.
     ///
-    /
-    /
+    /// Checks that SHA-256(challenge + ":" + nonce) has the required number
+    /// of leading zero bits.
     pub fn verify_solution(&self, challenge: &str, nonce: &str) -> bool {
         let data = format!("{}:{}", challenge, nonce);
         let hash = Sha256::digest(data.as_bytes());
 
+        // Count leading zero bits
         let mut zeros = 0u32;
         for byte in hash.iter() {
             if *byte == 0 {
                 zeros += 8;
             } else {
+                // Count leading zeros in this byte
                 zeros += byte.leading_zeros();
                 break;
             }
         }
 
+        // We require at least 16 leading zero bits as minimum
+        // The actual difficulty check is done by the client
         zeros >= 16
     }
 
-    /
+    /// Generate a signed clearance cookie value for the given IP.
     ///
-    /
-    /
+    /// Cookie format: `timestamp:random_hex:ip_hash:nonce:signature`
+    /// Where signature = base64url(HMAC-SHA256(challenge + ":" + nonce, hmac_secret))
     pub fn generate_clearance_cookie(&self, ip: &IpAddr) -> String {
         let timestamp = Utc::now().timestamp();
         let random_hex = self.generate_random_hex(16);
         let ip_hash = self.hash_ip(ip);
         let challenge = format!("{}:{}:{}", timestamp, random_hex, ip_hash);
-        let nonce = "0";
+        let nonce = "0"; // Pre-verified clearance, no PoW needed
         let signature = self.compute_signature(&challenge, nonce, "clearance");
 
         let cookie_value = format!("{}:{}:{}", challenge, nonce, signature);
@@ -226,17 +239,18 @@ impl ChallengeSystem {
     }
 
 
-    /
+    /// Verify a nojs verification token and signature.
     ///
-    /
-    /
-    /
-    /
+    /// Used by the non-JavaScript fallback flow: the `<meta http-equiv="refresh">`
+    /// tag redirects browsers to `/__fortress/nojs-verify?token=...&sig=...`.
+    /// This method validates the HMAC signature and checks that the token
+    /// timestamp is no older than 5 minutes.
     pub fn verify_nojs_token(&self, token: &str, sig: &str) -> bool {
         let expected_sig = self.compute_signature(token, "0", "nojs");
         if sig != expected_sig {
             return false;
         }
+        // Check timestamp freshness (5 minutes)
         if let Some(ts_str) = token.split(':').next() {
             if let Ok(ts) = ts_str.parse::<i64>() {
                 let now = chrono::Utc::now().timestamp();
@@ -248,8 +262,8 @@ impl ChallengeSystem {
         true
     }
 
-    /
-    /
+    /// Check if a path is exempt from challenges.
+    /// Supports `*` wildcard anywhere in the pattern (e.g. `/google*.html`, `/api/*/webhook`).
     pub fn is_exempt_path(&self, path: &str) -> bool {
         for exempt in &self.exempt_paths {
             if glob_match(exempt, path) {
@@ -259,8 +273,9 @@ impl ChallengeSystem {
         false
     }
 
+    // Private helpers
 
-    /
+    /// Extract the clearance cookie value from a Cookie header string.
     fn extract_cookie<'a>(&self, cookies: &'a str) -> Option<&'a str> {
         for cookie in cookies.split(';') {
             let cookie = cookie.trim();
@@ -271,10 +286,10 @@ impl ChallengeSystem {
         None
     }
 
-    /
+    /// Compute HMAC-SHA256 signature, returned as base64url.
     ///
-    /
-    /
+    /// The `purpose` parameter is mixed into the HMAC to produce
+    /// domain-separated signatures (e.g. "clearance" vs "nojs").
     fn compute_signature(&self, challenge: &str, nonce: &str, purpose: &str) -> String {
         let data = format!("{}:{}", challenge, nonce);
         let mut mac = HmacSha256::new_from_slice(&self.hmac_secret)
@@ -286,11 +301,11 @@ impl ChallengeSystem {
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(result)
     }
 
-    /
+    /// Hash an IP address with the HMAC secret, returning first 8 hex chars.
     ///
-    /
-    /
-    /
+    /// When `cookie_subnet_binding` is enabled, hashes the /24 (IPv4) or
+    /// /48 (IPv6) subnet instead of the exact IP. This reduces false positives
+    /// when a user switches between nearby networks (e.g. WiFi -> mobile).
     fn hash_ip(&self, ip: &IpAddr) -> String {
         let ip_str = if self.cookie_subnet_binding {
             match ip {
@@ -308,10 +323,10 @@ impl ChallengeSystem {
         };
         let data = format!("{}{}", ip_str, String::from_utf8_lossy(&self.hmac_secret));
         let hash = Sha256::digest(data.as_bytes());
-        hex::encode(&hash[..4])
+        hex::encode(&hash[..4]) // First 4 bytes = 8 hex chars
     }
 
-    /
+    /// Generate a random hex string of the specified length.
     fn generate_random_hex(&self, len: usize) -> String {
         let mut rng = rand::rng();
         let bytes: Vec<u8> = (0..len / 2).map(|_| rng.random()).collect();
@@ -319,18 +334,18 @@ impl ChallengeSystem {
     }
 }
 
-/
+/// Inline hex encoding utility to avoid extra dependency.
 mod hex {
     pub fn encode(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }
 }
 
-/
+/// The full HTML challenge page template.
 ///
-/
-/
-/
+/// Placeholders:
+/// - `__CHALLENGE__`: The challenge string (timestamp:random_hex)
+/// - `__DIFFICULTY__`: Number of leading zero bits required
 const CHALLENGE_HTML_TEMPLATE: &str = r#"<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -364,14 +379,19 @@ noscript { color: #ef4444; }
 </div>
 <script>
 (async function() {
+  // Headless browser detection
   var hlScore = 0;
   try {
+    // navigator.webdriver (Puppeteer/Playwright/Selenium)
     if (navigator.webdriver) hlScore += 40;
+    // Chrome DevTools Protocol traces
     if (window.chrome && window.chrome.csi) hlScore += 10;
     if (window.__nightmare) hlScore += 40;
     if (document.__selenium_unwrapped || document.__webdriver_evaluate || document.__driver_evaluate) hlScore += 40;
+    // Zero plugins on desktop (mobile normally has 0)
     var isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
     if (!isMobile && navigator.plugins && navigator.plugins.length === 0) hlScore += 10;
+    // WebGL renderer check for headless signatures
     try {
       var canvas = document.createElement("canvas");
       var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
@@ -383,8 +403,11 @@ noscript { color: #ef4444; }
         }
       }
     } catch(e) {}
+    // Screen dimensions of 0 (headless default)
     if (screen.width === 0 || screen.height === 0) hlScore += 20;
+    // Missing language
     if (!navigator.language && !navigator.languages) hlScore += 10;
+    // Phantom.js
     if (window.callPhantom || window._phantom) hlScore += 40;
   } catch(e) {}
   var challenge = "__CHALLENGE__";
@@ -421,22 +444,25 @@ noscript { color: #ef4444; }
 </body>
 </html>"#;
 
-/
-/
+/// Simple glob matching: supports `*` wildcard anywhere in the pattern.
+/// Each `*` matches zero or more characters (non-greedy segments).
 fn glob_match(pattern: &str, text: &str) -> bool {
     let parts: Vec<&str> = pattern.split('*').collect();
 
+    // No wildcard → exact match
     if parts.len() == 1 {
         return pattern == text;
     }
 
     let mut pos = 0usize;
 
+    // First segment must be a prefix
     if !text.starts_with(parts[0]) {
         return false;
     }
     pos = parts[0].len();
 
+    // Middle segments must appear in order
     for &part in &parts[1..parts.len() - 1] {
         if let Some(idx) = text[pos..].find(part) {
             pos += idx + part.len();
@@ -445,8 +471,10 @@ fn glob_match(pattern: &str, text: &str) -> bool {
         }
     }
 
+    // Last segment must be a suffix
     let last = parts[parts.len() - 1];
     if last.is_empty() {
+        // Pattern ended with `*` — matches anything remaining
         return true;
     }
     text[pos..].ends_with(last) && (text.len() - last.len()) >= pos

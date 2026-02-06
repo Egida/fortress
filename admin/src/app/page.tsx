@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { fortressGet } from '@/lib/api';
+import { fortressGet, fortressPost } from '@/lib/api';
 import {
   FortressStatus,
   FortressMetrics,
@@ -9,6 +9,7 @@ import {
   SecondSnapshot,
   ThreatSummary,
   ManagedRule,
+  FortressSettings,
 } from '@/lib/types';
 import { PROTECTION_LEVELS, PROTECTION_LEVELS_LIST, formatUptime, formatNumber } from '@/lib/constants';
 import {
@@ -33,14 +34,26 @@ import {
   Flame,
   Server,
   Gauge,
+  ChevronRight,
+  RotateCcw,
+  Siren,
+  BotOff,
+  Check,
+  Loader2,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Threat score helpers (same logic as threat-map)                    */
 /* ------------------------------------------------------------------ */
+const LEVEL_KEY_MAP: Record<string, string> = {
+  L0: 'Normal', L1: 'High', L2: 'UnderAttack', L3: 'Severe', L4: 'Emergency',
+  Normal: 'Normal', High: 'High', UnderAttack: 'UnderAttack', Severe: 'Severe', Emergency: 'Emergency',
+};
+
 function threatScore(s: ThreatSummary): number {
   let score = 0;
-  const lvl = PROTECTION_LEVELS[s.protection_level]?.level ?? 0;
+  const mappedKey = LEVEL_KEY_MAP[s.protection_level] ?? s.protection_level;
+  const lvl = PROTECTION_LEVELS[mappedKey]?.level ?? 0;
   score += lvl * 18;
   if (s.block_rate > 50) score += 25;
   else if (s.block_rate > 30) score += 15;
@@ -97,23 +110,29 @@ export default function DashboardPage() {
   const [history, setHistory] = useState<SecondSnapshot[]>([]);
   const [threatSummary, setThreatSummary] = useState<ThreatSummary | null>(null);
   const [managedRules, setManagedRules] = useState<ManagedRule[]>([]);
+  const [settings, setSettings] = useState<FortressSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [switchingLevel, setSwitchingLevel] = useState<string | null>(null);
+  const [switchSuccess, setSwitchSuccess] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const [s, m, h, ts, mr] = await Promise.all([
+      const [s, m, h, ts, mr, st] = await Promise.all([
         fortressGet<FortressStatus>('/api/fortress/status'),
         fortressGet<FortressMetrics>('/api/fortress/metrics'),
         fortressGet<MetricsHistoryResponse>('/api/fortress/metrics/history?granularity=second'),
         fortressGet<ThreatSummary>('/api/fortress/threat-summary'),
-        fortressGet<ManagedRule[]>('/api/fortress/managed-rules'),
+        fortressGet<{ rules: ManagedRule[] } | ManagedRule[]>('/api/fortress/managed-rules'),
+        fortressGet<FortressSettings>('/api/fortress/settings').catch(() => null),
       ]);
       setStatus(s);
       setMetrics(m);
       setHistory(h.data || []);
       setThreatSummary(ts);
-      setManagedRules(Array.isArray(mr) ? mr : []);
+      const rulesArray = Array.isArray(mr) ? mr : (mr && 'rules' in mr ? mr.rules : []);
+      setManagedRules(Array.isArray(rulesArray) ? rulesArray : []);
+      if (st) setSettings(st);
       setError(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
@@ -132,6 +151,35 @@ export default function DashboardPage() {
     const d = new Date(ts * 1000);
     return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   };
+
+  /* ---------------------------------------------------------------- */
+  /*  Protection level switching                                      */
+  /* ---------------------------------------------------------------- */
+  const handleSwitchLevel = useCallback(async (level: string) => {
+    setSwitchingLevel(level);
+    setSwitchSuccess(null);
+    try {
+      await fortressPost('/api/fortress/level', { level });
+      setSwitchSuccess(level);
+      setTimeout(() => setSwitchSuccess(null), 3000);
+      fetchData();
+    } catch {
+      setError('Failed to change protection level');
+    } finally {
+      setSwitchingLevel(null);
+    }
+  }, [fetchData]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Quick Response level definitions                                */
+  /* ---------------------------------------------------------------- */
+  const qrLevels = [
+    { key: 'Normal', label: 'DEFCON 5', shortLabel: '5', color: 'emerald', desc: 'Passive Monitoring' },
+    { key: 'High', label: 'DEFCON 4', shortLabel: '4', color: 'blue', desc: 'Active Defense' },
+    { key: 'UnderAttack', label: 'DEFCON 3', shortLabel: '3', color: 'yellow', desc: 'Threat Engagement' },
+    { key: 'Severe', label: 'DEFCON 2', shortLabel: '2', color: 'orange', desc: 'Maximum Defense' },
+    { key: 'Emergency', label: 'DEFCON 1', shortLabel: '1', color: 'red', desc: 'Full Lockdown' },
+  ];
 
   /* ---------------------------------------------------------------- */
   /*  Loading skeleton                                                */
@@ -217,9 +265,11 @@ export default function DashboardPage() {
   const levelMeta = PROTECTION_LEVELS[levelKey] ?? PROTECTION_LEVELS['Normal'];
   const defcon = defconFromLevel(levelKey);
 
+  // Threat score
   const score = threatSummary ? threatScore(threatSummary) : 0;
   const fill = scoreFill(score);
 
+  // Primary stat cards
   const totalBlocked = metrics.total_blocked ?? 0;
   const totalRequests = metrics.total_requests ?? 0;
   const challengedPerSec = metrics.challenged_per_sec ?? 0;
@@ -279,6 +329,7 @@ export default function DashboardPage() {
     },
   ];
 
+  // Secondary threat cards
   const autoBanCount = threatSummary?.auto_ban_count ?? 0;
   const ipReputationTracked = threatSummary?.ip_reputation_tracked ?? 0;
   const distributedActive = threatSummary?.distributed_attack_active ?? false;
@@ -327,6 +378,7 @@ export default function DashboardPage() {
     },
   ];
 
+  // Chart data
   const chartData = history.slice(-60).map((snap) => ({
     time: formatTime(snap.timestamp),
     passed: snap.passed ?? 0,
@@ -334,9 +386,11 @@ export default function DashboardPage() {
     blocked: snap.blocked ?? 0,
   }));
 
+  // Managed rules count
   const enabledRulesCount = managedRules.filter(r => r.enabled).length;
   const totalRulesCount = managedRules.length || 20;
 
+  // Defense systems badges
   const defenseBadges = [
     { label: 'JA3 Engine', status: 'ACTIVE', icon: Fingerprint, color: 'text-green-400', bgColor: 'bg-green-500/10', borderColor: 'border-green-800/50' },
     { label: 'PoW System', status: 'ARMED', icon: Crosshair, color: 'text-green-400', bgColor: 'bg-green-500/10', borderColor: 'border-green-800/50' },
@@ -369,9 +423,10 @@ export default function DashboardPage() {
         }
       `}</style>
 
-      {/* ===== STATUS BANNER ===== */}
-      <div className={`rounded-xl border ${defcon.borderClass} ${defcon.bgClass} px-6 py-4`}>
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      {/* ===== STATUS BANNER + QUICK RESPONSE ===== */}
+      <div className={`rounded-xl border-2 ${defcon.borderClass} ${defcon.bgClass} overflow-hidden`}>
+        {/* Top bar */}
+        <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
               <ShieldAlert className={`h-6 w-6 ${defcon.color}`} />
@@ -405,6 +460,102 @@ export default function DashboardPage() {
               </span>
               <span className="text-green-400">LIVE</span>
             </span>
+          </div>
+        </div>
+
+        {/* Quick Response Section - integrated into banner */}
+        <div className="border-t border-zinc-800/50 bg-black/30 px-6 py-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <Siren className="h-4 w-4 text-yellow-500" />
+              <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-widest">
+                Quick Response
+              </span>
+              {switchSuccess && (
+                <span className="flex items-center gap-1.5 text-xs text-green-400 font-mono">
+                  <Check className="h-3.5 w-3.5" />
+                  OK
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {settings?.protection?.auto_escalation && (
+                <span className="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 border border-cyan-800/50 rounded-full px-2.5 py-0.5">
+                  AUTO-ESCALATION
+                </span>
+              )}
+              {/* PANIC + RESET buttons */}
+              <button
+                onClick={() => handleSwitchLevel('Emergency')}
+                disabled={levelKey === 'Emergency' || !!switchingLevel}
+                className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-[11px] font-black tracking-wider transition-all duration-200 ${
+                  levelKey === 'Emergency'
+                    ? 'border-red-900/50 bg-red-500/5 text-red-800 cursor-not-allowed'
+                    : 'border-red-500/40 bg-red-500/15 text-red-400 hover:bg-red-500/30 hover:border-red-400 hover:shadow-lg hover:shadow-red-500/10 cursor-pointer'
+                }`}
+              >
+                {switchingLevel === 'Emergency' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Siren className="h-3.5 w-3.5" />}
+                PANIC
+              </button>
+              <button
+                onClick={() => handleSwitchLevel('Normal')}
+                disabled={levelKey === 'Normal' || !!switchingLevel}
+                className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-[11px] font-black tracking-wider transition-all duration-200 ${
+                  levelKey === 'Normal'
+                    ? 'border-emerald-900/50 bg-emerald-500/5 text-emerald-800 cursor-not-allowed'
+                    : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30 hover:border-emerald-400 hover:shadow-lg hover:shadow-emerald-500/10 cursor-pointer'
+                }`}
+              >
+                {switchingLevel === 'Normal' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                RESET
+              </button>
+            </div>
+          </div>
+
+          {/* DEFCON Level Buttons - wider, more visible */}
+          <div className="grid grid-cols-5 gap-2">
+            {qrLevels.map((lvl) => {
+              const isActive = levelKey === lvl.key;
+              const isSwitching = switchingLevel === lvl.key;
+              const colorMap: Record<string, { bg: string; hoverBg: string; border: string; text: string; activeBg: string; activeBorder: string; dot: string; ring: string }> = {
+                emerald: { bg: 'bg-emerald-950/30', hoverBg: 'hover:bg-emerald-500/20', border: 'border-zinc-800/70 hover:border-emerald-500/50', text: 'text-emerald-400', activeBg: 'bg-emerald-500/25', activeBorder: 'border-emerald-400/60', dot: 'bg-emerald-400', ring: 'ring-emerald-500/30' },
+                blue: { bg: 'bg-blue-950/30', hoverBg: 'hover:bg-blue-500/20', border: 'border-zinc-800/70 hover:border-blue-500/50', text: 'text-blue-400', activeBg: 'bg-blue-500/25', activeBorder: 'border-blue-400/60', dot: 'bg-blue-400', ring: 'ring-blue-500/30' },
+                yellow: { bg: 'bg-yellow-950/30', hoverBg: 'hover:bg-yellow-500/20', border: 'border-zinc-800/70 hover:border-yellow-500/50', text: 'text-yellow-400', activeBg: 'bg-yellow-500/25', activeBorder: 'border-yellow-400/60', dot: 'bg-yellow-400', ring: 'ring-yellow-500/30' },
+                orange: { bg: 'bg-orange-950/30', hoverBg: 'hover:bg-orange-500/20', border: 'border-zinc-800/70 hover:border-orange-500/50', text: 'text-orange-400', activeBg: 'bg-orange-500/25', activeBorder: 'border-orange-400/60', dot: 'bg-orange-400', ring: 'ring-orange-500/30' },
+                red: { bg: 'bg-red-950/30', hoverBg: 'hover:bg-red-500/20', border: 'border-zinc-800/70 hover:border-red-500/50', text: 'text-red-400', activeBg: 'bg-red-500/25', activeBorder: 'border-red-400/60', dot: 'bg-red-400', ring: 'ring-red-500/30' },
+              };
+              const c = colorMap[lvl.color];
+              return (
+                <button
+                  key={lvl.key}
+                  onClick={() => !isActive && !isSwitching && handleSwitchLevel(lvl.key)}
+                  disabled={isActive || !!switchingLevel}
+                  className={`relative flex items-center gap-3 rounded-lg border px-4 py-3 transition-all duration-200 ${
+                    isActive
+                      ? `${c.activeBg} ${c.activeBorder} ring-2 ${c.ring} shadow-lg`
+                      : `${c.bg} ${c.hoverBg} ${c.border} cursor-pointer`
+                  } ${switchingLevel && !isSwitching ? 'opacity-30' : ''}`}
+                >
+                  {isActive && (
+                    <span className={`absolute top-2 right-2 w-2.5 h-2.5 rounded-full ${c.dot} animate-pulse`} />
+                  )}
+                  <div className="flex flex-col items-start">
+                    {isSwitching ? (
+                      <Loader2 className={`h-5 w-5 ${c.text} animate-spin`} />
+                    ) : (
+                      <>
+                        <span className={`text-base font-black font-mono leading-none ${isActive ? c.text : 'text-zinc-500'}`}>
+                          {lvl.label}
+                        </span>
+                        <span className={`text-[10px] mt-1 ${isActive ? c.text + ' opacity-80' : 'text-zinc-600'}`}>
+                          {lvl.desc}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

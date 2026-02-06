@@ -46,7 +46,7 @@ use crate::storage::blocklist::BlocklistManager;
 use crate::storage::memory::MemoryStore;
 use crate::storage::sqlite::SqliteStore;
 
-/
+/// Parse the `--config` CLI flag. Defaults to `/opt/fortress/config/fortress.toml`.
 fn parse_config_path() -> String {
     let args: Vec<String> = std::env::args().collect();
     let mut config_path = String::from("/opt/fortress/config/fortress.toml");
@@ -66,7 +66,7 @@ fn parse_config_path() -> String {
     config_path
 }
 
-/
+/// Initialise the `tracing` subscriber with both stdout and file output.
 fn init_tracing(log_dir: &str) {
     let _ = std::fs::create_dir_all(log_dir);
 
@@ -95,8 +95,8 @@ fn init_tracing(log_dir: &str) {
         .init();
 }
 
-/
-/
+/// Background task that periodically evicts expired entries from the
+/// in-memory store, L4 tracker, slowloris detector, auto-ban, and IP reputation.
 async fn cleanup_loop(
     memory: Arc<MemoryStore>,
     l4_tracker: Option<Arc<L4Tracker>>,
@@ -123,14 +123,21 @@ async fn cleanup_loop(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Install rustls crypto provider before any TLS operations
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls CryptoProvider");
 
+    // ---------------------------------------------------------------
+    // 1. Configuration
+    // ---------------------------------------------------------------
     let config_path = parse_config_path();
     let settings = Settings::load(&config_path)?;
     let settings = Arc::new(settings);
 
+    // ---------------------------------------------------------------
+    // 2. Logging
+    // ---------------------------------------------------------------
     let log_dir = std::path::Path::new(&settings.logging.file)
         .parent()
         .and_then(|p| p.to_str())
@@ -141,6 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting Fortress anti-DDoS reverse proxy");
     info!("Config loaded from {}", config_path);
 
+    // ---------------------------------------------------------------
+    // 3. Storage
+    // ---------------------------------------------------------------
     let sqlite = Arc::new(
         SqliteStore::new(&settings.storage.sqlite_path)
             .expect("Failed to initialise SQLite store"),
@@ -153,6 +163,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .load_from_db()
         .expect("Failed to load blocklist from database");
 
+    // ---------------------------------------------------------------
+    // 3.5 Load config blocklists into database
+    // ---------------------------------------------------------------
     for country in &settings.blocklist.blocked_countries {
         if let Err(e) = sqlite.add_blocked_country(country, None, "block", Some("config")) {
             warn!("Failed to load blocked country {}: {}", country, e);
@@ -168,17 +181,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             warn!("Failed to load blocked ASN {}: {}", asn, e);
         }
     }
+    // Reload blocklist after config additions
     if let Err(e) = blocklist.load_from_db() {
         warn!("Failed to reload blocklist: {}", e);
     }
 
     info!("Storage layer initialised");
 
+    // ---------------------------------------------------------------
+    // Service Router
+    // ---------------------------------------------------------------
     let service_router = Arc::new(ServiceRouter::new(&settings.upstream.address));
     service_router.load_from_db(&sqlite)?;
     service_router.load_from_config(&settings.services);
     info!("Loaded {} services", service_router.service_count());
 
+    // ---------------------------------------------------------------
+    // 4. Protection components
+    // ---------------------------------------------------------------
     let geoip = Arc::new(
         GeoIpLookup::new(&settings.geoip.city_db, &settings.geoip.asn_db),
     );
@@ -201,6 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let managed_rules = Arc::new(ManagedRulesEngine::new());
     let custom_rules = Arc::new(CustomRulesEngine::new(Arc::clone(&sqlite)));
 
+    // Apply default protection level from config
     if settings.protection.default_level > 0 {
         if let Some(level) = crate::models::threat::ProtectionLevel::from_u8(settings.protection.default_level) {
             escalation.set_level(level);
@@ -230,6 +251,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Protection pipeline initialised");
 
+    // ---------------------------------------------------------------
+    // L4 Protection
+    // ---------------------------------------------------------------
     let l4_tracker = if settings.l4_protection.enabled {
         let tracker = Arc::new(L4Tracker::new(settings.l4_protection.clone()));
         info!("L4 TCP protection enabled");
@@ -239,6 +263,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    // ---------------------------------------------------------------
+    // 5. Proxy infrastructure
+    // ---------------------------------------------------------------
     let connections = Arc::new(ConnectionTracker::new());
     let metrics = Arc::new(MetricsCollector::new());
 
@@ -285,6 +312,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Proxy server configured");
 
+    // ---------------------------------------------------------------
+    // 6. Admin API
+    // ---------------------------------------------------------------
     let admin_state = AppState {
         memory: memory.clone(),
         sqlite: sqlite.clone(),
@@ -310,6 +340,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Admin API will listen on {}", admin_bind);
 
+    // ---------------------------------------------------------------
+    // 7. Alerting
+    // ---------------------------------------------------------------
     let alerting = if settings.alerting.enabled {
         let manager = Arc::new(AlertManager::new(
             settings.alerting.webhook_url.clone(),
@@ -322,6 +355,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    // ---------------------------------------------------------------
+    // 8. Metrics reporter
+    // ---------------------------------------------------------------
     let reporter = MetricsReporter::new(
         metrics.clone(),
         sqlite.clone(),
@@ -330,12 +366,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         alerting.clone(),
     );
 
+    // ---------------------------------------------------------------
+    // 9. Health checker
+    // ---------------------------------------------------------------
     let health_checker = Arc::new(HealthChecker::new(
         service_router.clone(),
-        10,
-        5000,
+        10, // check every 10 seconds
+        5000, // 5 second timeout
     ));
 
+    // ---------------------------------------------------------------
+    // 10. Spawn everything
+    // ---------------------------------------------------------------
     let memory_clone = memory.clone();
     let l4_tracker_cleanup = l4_tracker.clone();
     let slowloris_cleanup = slowloris_detector.clone();
@@ -376,9 +418,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Fortress is running. Press Ctrl+C to shut down.");
 
+    // ---------------------------------------------------------------
+    // 11. Wait for shutdown signal
+    // ---------------------------------------------------------------
     tokio::signal::ctrl_c().await?;
     info!("Shutting down Fortress...");
 
+    // Cancel background tasks.
     proxy_handle.abort();
     admin_handle.abort();
     reporter_handle.abort();

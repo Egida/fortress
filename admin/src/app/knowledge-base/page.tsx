@@ -510,6 +510,7 @@ export default function KnowledgeBasePage() {
     });
   }, [searchQuery]);
 
+  // Auto-open sections when searching
   const effectiveOpenSections = useMemo(() => {
     if (searchQuery.trim()) {
       return new Set(filteredSections.map((s) => s.id));

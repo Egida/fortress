@@ -131,6 +131,7 @@ export default function L4Page() {
       const data = await fortressGet<L4Event[]>('/api/fortress/l4/events?limit=50');
       setEvents(data);
     } catch {
+      // Silently handle event fetch errors since metrics error is shown
     } finally {
       setLoadingEvents(false);
     }

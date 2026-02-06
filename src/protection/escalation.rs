@@ -7,13 +7,13 @@ use tracing::{debug, info, warn};
 use crate::config::settings::Settings;
 use crate::models::threat::ProtectionLevel;
 
-/
+/// Auto-escalation engine that adjusts protection level based on traffic patterns.
 ///
-/
-/
-/
-/
-/
+/// Key improvements over naive RPS-based escalation:
+/// - Requires SUSTAINED high traffic (configurable consecutive checks)
+/// - Considers block ratio (high RPS with low block ratio = legitimate traffic)
+/// - Uses config values for de-escalation cooldown
+/// - Faster de-escalation (3 consecutive checks instead of 5)
 pub struct EscalationEngine {
     current_level: AtomicU8,
     last_escalation: Mutex<Instant>,
@@ -25,9 +25,9 @@ pub struct EscalationEngine {
     deescalation_cooldown: Duration,
 }
 
-/
+/// Number of consecutive low-traffic checks required before de-escalation
 const DEESCALATION_CONSECUTIVE_CHECKS: u8 = 3;
-/
+/// Minimum time between escalations (seconds)
 const ESCALATION_COOLDOWN_SECS: u64 = 10;
 
 impl EscalationEngine {
@@ -44,7 +44,7 @@ impl EscalationEngine {
         }
     }
 
-    /
+    /// Create with config values.
     pub fn with_config(settings: &Settings) -> Self {
         Self {
             current_level: AtomicU8::new(0),
@@ -76,24 +76,27 @@ impl EscalationEngine {
         }
     }
 
-    /
+    /// Evaluate current traffic metrics and adjust protection level.
     ///
-    /
-    /
-    /
-    /
-    /
+    /// Arguments:
+    /// - `rps`: Current requests per second
+    /// - `blocked_per_min`: Number of requests blocked in the last minute
+    /// - `total_per_min`: Total requests in the last minute (for block ratio)
+    /// - `settings`: Application settings containing escalation thresholds
     pub fn evaluate(&self, rps: f64, blocked_per_min: u64, total_per_min: u64, settings: &Settings) {
         let current = self.current_level.load(Ordering::Relaxed);
         let thresholds = self.get_thresholds(settings);
 
+        // Calculate block ratio
         let block_ratio = if total_per_min > 0 {
             blocked_per_min as f64 / total_per_min as f64
         } else {
             0.0
         };
 
+        // Try escalation with sustained-traffic requirement
         if self.should_escalate(current, rps, blocked_per_min, &thresholds) {
+            // Block ratio check: high RPS with low block ratio = likely legitimate
             if block_ratio < self.block_ratio_threshold && current == 0 {
                 debug!(
                     rps = rps,
@@ -122,8 +125,10 @@ impl EscalationEngine {
             return;
         }
 
+        // Conditions not met for escalation, reset counter
         self.escalation_counter.store(0, Ordering::Relaxed);
 
+        // Try de-escalation
         if self.should_deescalate(current, rps, blocked_per_min, &thresholds) {
             let counter = self.deescalation_counter.fetch_add(1, Ordering::Relaxed) + 1;
             if counter >= DEESCALATION_CONSECUTIVE_CHECKS {

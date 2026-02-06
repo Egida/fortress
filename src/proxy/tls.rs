@@ -8,7 +8,7 @@ use rustls::sign::CertifiedKey;
 use rustls::version::{TLS12, TLS13};
 use tracing::{debug, error, info, warn};
 
-/
+/// Parsed fields from a TLS ClientHello message used for JA3 fingerprinting.
 struct ClientHelloInfo {
     tls_version: u16,
     cipher_suites: Vec<u16>,
@@ -17,11 +17,11 @@ struct ClientHelloInfo {
     ec_point_formats: Vec<u8>,
 }
 
-/
+/// SNI-based certificate resolver for the Fortress reverse proxy.
 ///
-/
-/
-/
+/// Loads certificates from a directory structure (e.g. Let's Encrypt live dirs)
+/// and selects the correct certificate based on the SNI hostname presented
+/// during the TLS handshake.
 #[derive(Debug)]
 pub struct FortressCertResolver {
     certs: HashMap<String, Arc<CertifiedKey>>,
@@ -29,11 +29,11 @@ pub struct FortressCertResolver {
 }
 
 impl FortressCertResolver {
-    /
-    /
+    /// Scan a certificate directory (e.g. `/etc/letsencrypt/live/`) and load
+    /// every domain certificate found within.
     ///
-    /
-    /
+    /// Each subdirectory is expected to contain `fullchain.pem` and `privkey.pem`.
+    /// The first successfully loaded certificate becomes the default fallback.
     pub fn load_certs(cert_dir: &str) -> Self {
         let mut certs: HashMap<String, Arc<CertifiedKey>> = HashMap::new();
         let mut default_cert: Option<Arc<CertifiedKey>> = None;
@@ -111,10 +111,12 @@ impl ResolvesServerCert for FortressCertResolver {
         if let Some(hostname) = sni {
             debug!("TLS SNI hostname: {}", hostname);
 
+            // Exact match first.
             if let Some(ck) = self.certs.get(hostname) {
                 return Some(Arc::clone(ck));
             }
 
+            // Try wildcard match: for "sub.example.com" check "example.com".
             if let Some(dot_pos) = hostname.find('.') {
                 let parent = &hostname[dot_pos + 1..];
                 if let Some(ck) = self.certs.get(parent) {
@@ -134,11 +136,12 @@ impl ResolvesServerCert for FortressCertResolver {
     }
 }
 
-/
+/// Load a PEM certificate chain and private key into a [`CertifiedKey`].
 fn load_certified_key(
     cert_path: &std::path::Path,
     key_path: &std::path::Path,
 ) -> Result<CertifiedKey, Box<dyn std::error::Error>> {
+    // --- certificates ---
     let cert_file = fs::File::open(cert_path)?;
     let mut cert_reader = BufReader::new(cert_file);
     let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
@@ -150,6 +153,7 @@ fn load_certified_key(
         return Err(format!("No certificates found in {}", cert_path.display()).into());
     }
 
+    // --- private key ---
     let key_file = fs::File::open(key_path)?;
     let mut key_reader = BufReader::new(key_file);
 
@@ -161,12 +165,15 @@ fn load_certified_key(
     Ok(CertifiedKey::new(certs, signing_key))
 }
 
+// ---------------------------------------------------------------------------
+// TLS ServerConfig builder
+// ---------------------------------------------------------------------------
 
-/
+/// Build a [`rustls::ServerConfig`] suitable for the Fortress reverse proxy.
 ///
-/
-/
-/
+/// * Uses SNI-based certificate resolution via [`FortressCertResolver`].
+/// * Advertises HTTP/2 and HTTP/1.1 via ALPN.
+/// * Requires TLS 1.2 as the minimum protocol version.
 pub fn build_tls_config(
     cert_dir: &str,
 ) -> Result<rustls::ServerConfig, Box<dyn std::error::Error>> {
@@ -181,15 +188,21 @@ pub fn build_tls_config(
     Ok(config)
 }
 
+// ---------------------------------------------------------------------------
+// JA3 fingerprint extraction
+// ---------------------------------------------------------------------------
 
-/
-/
+/// Extract a JA3 fingerprint hash from a raw TCP buffer that is expected to
+/// contain a TLS ClientHello message.
 ///
-/
-/
+/// Returns the hex-encoded MD5 digest of the JA3 string, or `None` if the
+/// buffer cannot be parsed as a valid ClientHello.
 pub fn extract_ja3_from_client_hello(buf: &[u8]) -> Option<String> {
     let info = parse_client_hello(buf)?;
 
+    // Build the JA3 string:
+    //   TLSVersion,Ciphers,Extensions,EllipticCurves,EllipticCurvePointFormats
+    // Lists are dash-separated.
 
     let ciphers: String = info
         .cipher_suites
@@ -198,6 +211,7 @@ pub fn extract_ja3_from_client_hello(buf: &[u8]) -> Option<String> {
         .collect::<Vec<_>>()
         .join("-");
 
+    // GREASE values (0x?a?a) are excluded from the JA3 hash per specification.
     let is_grease = |v: u16| -> bool {
         (v & 0x0f0f) == 0x0a0a && ((v >> 8) == (v & 0xff))
     };
@@ -247,10 +261,13 @@ pub fn extract_ja3_from_client_hello(buf: &[u8]) -> Option<String> {
     Some(digest)
 }
 
-/
-/
-/
+/// Minimal MD5 implementation for JA3 hashing.
+/// JA3 spec requires MD5; we implement it inline to avoid pulling in another
+/// crate just for this single use-case.
 fn md5_hex(data: &[u8]) -> String {
+    // We use a simple port of the MD5 algorithm (RFC 1321).
+    // For production you might prefer the `md-5` crate, but this keeps
+    // dependencies minimal.
 
     const S: [u32; 64] = [
         7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
@@ -283,6 +300,7 @@ fn md5_hex(data: &[u8]) -> String {
     let mut c0: u32 = 0x98badcfe;
     let mut d0: u32 = 0x10325476;
 
+    // Pre-processing: adding padding bits
     let orig_len_bits = (data.len() as u64) * 8;
     let mut msg = data.to_vec();
     msg.push(0x80);
@@ -291,6 +309,7 @@ fn md5_hex(data: &[u8]) -> String {
     }
     msg.extend_from_slice(&orig_len_bits.to_le_bytes());
 
+    // Process each 512-bit (64-byte) chunk
     for chunk in msg.chunks_exact(64) {
         let mut m = [0u32; 16];
         for (i, word) in m.iter_mut().enumerate() {
@@ -343,57 +362,70 @@ fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+// ---------------------------------------------------------------------------
+// ClientHello parser (best-effort)
+// ---------------------------------------------------------------------------
 
-/
+/// Parse a raw TLS ClientHello from a byte buffer.
 ///
-/
+/// The expected layout is:
 ///
-/
-/
-/
-/
-/
-/
-/
-/
+/// ```text
+/// TLS record header : content_type(1) + version(2) + length(2)
+/// Handshake header  : msg_type(1) + length(3)
+/// ClientHello body  : version(2) + random(32) + session_id_len(1) + session_id(var)
+///                   + cipher_suites_len(2) + cipher_suites(var)
+///                   + compression_len(1) + compression(var)
+///                   + extensions_len(2) + extensions(var)
+/// ```
 ///
-/
+/// Returns `None` on any parse failure.
 fn parse_client_hello(data: &[u8]) -> Option<ClientHelloInfo> {
     let mut pos: usize = 0;
 
+    // --- TLS record header ---
     if data.len() < 5 {
         return None;
     }
     let content_type = data[pos];
     pos += 1;
     if content_type != 0x16 {
+        // Not a Handshake record.
         return None;
     }
+    // Record-layer version (ignored for JA3 purposes).
     pos += 2;
     let record_len = read_u16(data, &mut pos)? as usize;
     if data.len() < pos + record_len {
         return None;
     }
 
+    // --- Handshake header ---
     let handshake_type = read_u8(data, &mut pos)?;
     if handshake_type != 0x01 {
+        // Not a ClientHello.
         return None;
     }
+    // Handshake length (3 bytes).
     let _handshake_len = read_u24(data, &mut pos)?;
 
+    // --- ClientHello body ---
     let tls_version = read_u16(data, &mut pos)?;
 
+    // Random (32 bytes).
     if pos + 32 > data.len() {
         return None;
     }
     pos += 32;
 
+    // Session ID.
     let session_id_len = read_u8(data, &mut pos)? as usize;
     if pos + session_id_len > data.len() {
         return None;
     }
     pos += session_id_len;
 
+    // Cipher suites.
     let cs_len = read_u16(data, &mut pos)? as usize;
     if pos + cs_len > data.len() || cs_len % 2 != 0 {
         return None;
@@ -404,12 +436,14 @@ fn parse_client_hello(data: &[u8]) -> Option<ClientHelloInfo> {
         cipher_suites.push(read_u16(data, &mut pos)?);
     }
 
+    // Compression methods.
     let comp_len = read_u8(data, &mut pos)? as usize;
     if pos + comp_len > data.len() {
         return None;
     }
     pos += comp_len;
 
+    // Extensions.
     let mut extensions: Vec<u16> = Vec::new();
     let mut elliptic_curves: Vec<u16> = Vec::new();
     let mut ec_point_formats: Vec<u8> = Vec::new();
@@ -433,6 +467,7 @@ fn parse_client_hello(data: &[u8]) -> Option<ClientHelloInfo> {
             extensions.push(ext_type);
 
             match ext_type {
+                // supported_groups (elliptic_curves)
                 0x000a => {
                     let mut epos = ext_data_start;
                     if epos + 2 <= pos {
@@ -443,6 +478,7 @@ fn parse_client_hello(data: &[u8]) -> Option<ClientHelloInfo> {
                         }
                     }
                 }
+                // ec_point_formats
                 0x000b => {
                     let mut epos = ext_data_start;
                     if epos + 1 <= pos {
@@ -467,6 +503,9 @@ fn parse_client_hello(data: &[u8]) -> Option<ClientHelloInfo> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Byte-reading helpers
+// ---------------------------------------------------------------------------
 
 #[inline]
 fn read_u8(data: &[u8], pos: &mut usize) -> Option<u8> {

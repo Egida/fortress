@@ -1,4 +1,9 @@
+// FORTRESS - Type Definitions
+// Classification: INTERNAL USE ONLY
 
+// ---------------------------------------------------------------------------
+// Core Status & Metrics
+// ---------------------------------------------------------------------------
 
 export interface FortressStatus {
   active_connections: number;
@@ -28,6 +33,9 @@ export interface SecondSnapshot {
   challenged: number;
 }
 
+// ---------------------------------------------------------------------------
+// Traffic & Threat Data
+// ---------------------------------------------------------------------------
 
 export interface TopCountryEntry {
   country: string;
@@ -59,6 +67,9 @@ export interface LiveTrafficEvent {
   behavioral_score: number;
 }
 
+// ---------------------------------------------------------------------------
+// Blocklist Entities
+// ---------------------------------------------------------------------------
 
 export interface BlockedIp {
   id: number;
@@ -88,6 +99,9 @@ export interface BlockedCountry {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Rules & Policies
+// ---------------------------------------------------------------------------
 
 export interface ProtectionRule {
   id: number;
@@ -106,6 +120,9 @@ export interface ManagedRule {
   enabled: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Attacks
+// ---------------------------------------------------------------------------
 
 export interface Attack {
   id: number;
@@ -120,6 +137,9 @@ export interface Attack {
   top_ips_json: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Service Configuration
+// ---------------------------------------------------------------------------
 
 export interface ServiceConfig {
   id: string;
@@ -135,6 +155,9 @@ export interface ServiceConfig {
   response_timeout_ms: number;
 }
 
+// ---------------------------------------------------------------------------
+// Layer 4 Protection
+// ---------------------------------------------------------------------------
 
 export interface L4Metrics {
   total_allowed: number;
@@ -153,6 +176,9 @@ export interface L4Event {
   connection_rate: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
 
 export interface AnalyticsData {
   snapshot: FortressMetrics;
@@ -167,6 +193,9 @@ export interface MetricsHistoryResponse {
   data: SecondSnapshot[];
 }
 
+// ---------------------------------------------------------------------------
+// Configuration & Settings
+// ---------------------------------------------------------------------------
 
 export interface FortressConfig {
   protection_level?: string;
@@ -219,6 +248,9 @@ export interface FortressSettings {
   };
 }
 
+// ---------------------------------------------------------------------------
+// IP Reputation & Auto-Ban
+// ---------------------------------------------------------------------------
 
 export interface IpReputationEntry {
   ip: string;
@@ -235,6 +267,9 @@ export interface AutoBanEntry {
   total_duration_secs: number;
 }
 
+// ---------------------------------------------------------------------------
+// Threat Summary
+// ---------------------------------------------------------------------------
 
 export interface ThreatSummary {
   protection_level: string;
@@ -248,7 +283,11 @@ export interface ThreatSummary {
   distributed_unique_ips: number;
 }
 
+// NEW INTERFACES - Threat Intelligence & Security Operations
 
+// ---------------------------------------------------------------------------
+// Threat Intelligence
+// ---------------------------------------------------------------------------
 
 export interface ThreatIntelligence {
   /** Unique identifier for the threat intel record */
@@ -285,6 +324,9 @@ export interface ThreatIntelligence {
   metadata: Record<string, unknown>;
 }
 
+// ---------------------------------------------------------------------------
+// Security Event
+// ---------------------------------------------------------------------------
 
 export interface SecurityEvent {
   /** Unique event identifier */
@@ -337,6 +379,9 @@ export interface SecurityEvent {
   context: Record<string, unknown>;
 }
 
+// ---------------------------------------------------------------------------
+// SSL/TLS Certificate
+// ---------------------------------------------------------------------------
 
 export interface SSLCertificate {
   /** Certificate unique identifier */
@@ -371,6 +416,9 @@ export interface SSLCertificate {
   last_renewal_error: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Firewall Event
+// ---------------------------------------------------------------------------
 
 export interface FirewallEvent {
   /** Event unique identifier */
@@ -417,6 +465,9 @@ export interface FirewallEvent {
   attack_correlation_id: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// System Health
+// ---------------------------------------------------------------------------
 
 export interface SystemHealth {
   /** Overall system status */

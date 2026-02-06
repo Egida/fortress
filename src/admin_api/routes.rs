@@ -22,9 +22,12 @@ use crate::storage::blocklist::BlocklistManager;
 use crate::storage::memory::MemoryStore;
 use crate::storage::sqlite::SqliteStore;
 
+// ---------------------------------------------------------------------------
+// Shared application state
+// ---------------------------------------------------------------------------
 
-/
-/
+/// Shared state available to every admin API handler via Axum's `State`
+/// extractor.
 #[derive(Clone)]
 pub struct AppState {
     pub memory: Arc<MemoryStore>,
@@ -45,6 +48,9 @@ pub struct AppState {
     pub geoip: Arc<GeoIpLookup>,
 }
 
+// ---------------------------------------------------------------------------
+// Request / response DTOs
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 pub struct HistoryParams {
@@ -104,8 +110,11 @@ pub struct TopParams {
     pub limit: Option<usize>,
 }
 
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/status`
 pub async fn get_status(State(state): State<AppState>) -> Json<Value> {
     let uptime = state.start_time.elapsed().as_secs();
     let snapshot = state.metrics.get_snapshot();
@@ -128,7 +137,7 @@ pub async fn get_status(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-/
+/// `GET /api/fortress/metrics`
 pub async fn get_metrics(State(state): State<AppState>) -> Json<Value> {
     let snapshot = state.metrics.get_snapshot();
 
@@ -145,29 +154,32 @@ pub async fn get_metrics(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-/
+/// `GET /api/fortress/metrics/history`
 pub async fn get_metrics_history(
     State(state): State<AppState>,
     Query(params): Query<HistoryParams>,
 ) -> Json<Value> {
     let granularity = params.granularity.as_deref().unwrap_or("second");
 
+    // Determine how many raw seconds to fetch.
     let seconds_to_fetch: usize = match granularity {
-        "minute" => 3600,
-        "hour" => 3600,
-        _ => 300,
+        "minute" => 3600, // last hour at minute granularity
+        "hour" => 3600,   // full ring
+        _ => 300,         // last 5 minutes at second granularity
     };
 
     let history = state.metrics.get_second_history(seconds_to_fetch);
 
     let data: Vec<Value> = match granularity {
         "minute" => {
+            // Aggregate into 60-second buckets.
             aggregate_snapshots(&history, 60)
         }
         "hour" => {
             aggregate_snapshots(&history, 3600)
         }
         _ => {
+            // Raw per-second data.
             history
                 .iter()
                 .map(|s| {
@@ -191,10 +203,10 @@ pub async fn get_metrics_history(
     }))
 }
 
-/
+/// `GET /api/fortress/threats`
 ///
-/
-/
+/// Returns recent attacks from the database. Uses `get_attacks` with a
+/// lookback window of the last 24 hours.
 pub async fn get_threats(State(state): State<AppState>) -> Json<Value> {
     let now = Utc::now();
     let from = now - ChronoDuration::hours(24);
@@ -204,10 +216,13 @@ pub async fn get_threats(State(state): State<AppState>) -> Json<Value> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Blocklist CRUD
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/blocklist`
 ///
-/
+/// Returns blocklist entries from the SQLite store based on the requested type.
 pub async fn get_blocklist(
     State(state): State<AppState>,
     Query(params): Query<BlocklistParams>,
@@ -240,7 +255,7 @@ pub async fn get_blocklist(
     }
 }
 
-/
+/// `POST /api/fortress/blocklist`
 pub async fn add_to_blocklist(
     State(state): State<AppState>,
     Json(body): Json<AddBlocklistRequest>,
@@ -262,6 +277,7 @@ pub async fn add_to_blocklist(
             };
             match state.sqlite.add_blocked_asn(asn, None, "block", Some(reason)) {
                 Ok(id) => {
+                    // Reload blocklist from db to pick up the new entry
                     let _ = state.blocklist.load_from_db();
                     Json(json!({ "id": id, "status": "added" }))
                 }
@@ -281,7 +297,7 @@ pub async fn add_to_blocklist(
     }
 }
 
-/
+/// `DELETE /api/fortress/blocklist/:id`
 pub async fn remove_from_blocklist(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -300,8 +316,11 @@ pub async fn remove_from_blocklist(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Rules CRUD
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/rules`
 pub async fn get_rules(State(state): State<AppState>) -> Json<Value> {
     match state.sqlite.get_rules() {
         Ok(rules) => Json(json!({ "rules": rules })),
@@ -309,7 +328,7 @@ pub async fn get_rules(State(state): State<AppState>) -> Json<Value> {
     }
 }
 
-/
+/// `POST /api/fortress/rules`
 pub async fn create_rule(
     State(state): State<AppState>,
     Json(body): Json<CreateRuleRequest>,
@@ -326,7 +345,7 @@ pub async fn create_rule(
     }
 }
 
-/
+/// `PUT /api/fortress/rules/:id`
 pub async fn update_rule(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -348,7 +367,7 @@ pub async fn update_rule(
     }
 }
 
-/
+/// `DELETE /api/fortress/rules/:id`
 pub async fn delete_rule(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -359,10 +378,13 @@ pub async fn delete_rule(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/config`
 ///
-/
+/// Returns known configuration keys from the key-value config table.
 pub async fn get_config(State(state): State<AppState>) -> Json<Value> {
     let known_keys = [
         "protection_level",
@@ -379,10 +401,10 @@ pub async fn get_config(State(state): State<AppState>) -> Json<Value> {
     Json(Value::Object(config))
 }
 
-/
+/// `GET /api/fortress/settings`
 ///
-/
-/
+/// Returns the current running settings (read-only). Changes to these values
+/// require editing fortress.toml and restarting the service.
 pub async fn get_settings(State(state): State<AppState>) -> Json<Value> {
     let s = &state.settings;
     Json(json!({
@@ -430,9 +452,9 @@ pub async fn get_settings(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-/
+/// `PUT /api/fortress/config`
 ///
-/
+/// Accepts a JSON object of key-value pairs and stores each in the config table.
 pub async fn update_config(
     State(state): State<AppState>,
     Json(body): Json<Value>,
@@ -453,8 +475,11 @@ pub async fn update_config(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Protection level
+// ---------------------------------------------------------------------------
 
-/
+/// `POST /api/fortress/level`
 pub async fn set_level(
     State(state): State<AppState>,
     Json(body): Json<SetLevelRequest>,
@@ -478,8 +503,11 @@ pub async fn set_level(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/analytics`
 pub async fn get_analytics(State(state): State<AppState>) -> Json<Value> {
     let snapshot = state.metrics.get_snapshot();
     let top_ips = state.metrics.get_top_ips(10);
@@ -517,7 +545,7 @@ pub async fn get_analytics(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-/
+/// `GET /api/fortress/top-ips`
 pub async fn get_top_ips(
     State(state): State<AppState>,
     Query(params): Query<TopParams>,
@@ -533,7 +561,7 @@ pub async fn get_top_ips(
     }))
 }
 
-/
+/// `GET /api/fortress/top-countries`
 pub async fn get_top_countries(State(state): State<AppState>) -> Json<Value> {
     let top = state.metrics.get_top_countries(50);
 
@@ -545,7 +573,7 @@ pub async fn get_top_countries(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-/
+/// `GET /api/fortress/fingerprints`
 pub async fn get_fingerprints(State(state): State<AppState>) -> Json<Value> {
     let top = state.metrics.get_top_fingerprints(50);
 
@@ -557,6 +585,9 @@ pub async fn get_fingerprints(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
+// -----------------------------------------------------------------------
+// Services
+// -----------------------------------------------------------------------
 
 pub async fn list_services(
     State(state): State<AppState>,
@@ -645,6 +676,7 @@ pub async fn create_service(
         updated_at: None,
     };
 
+    // Save to DB
     let row = ServiceRow {
         id: config.id.clone(),
         name: config.name.clone(),
@@ -663,6 +695,7 @@ pub async fn create_service(
     };
     let _ = state.sqlite.add_service(&row);
 
+    // Register in router
     state.service_router.add_service(config);
 
     (StatusCode::CREATED, Json(serde_json::json!({"id": id, "status": "created"})))
@@ -733,8 +766,10 @@ pub async fn toggle_service(
         updated.enabled = !updated.enabled;
         let new_enabled = updated.enabled;
 
+        // Update in router (keep it registered even when disabled)
         state.service_router.update_service(updated);
 
+        // Persist to DB
         if let Ok(Some(row)) = state.sqlite.get_service(&id) {
             let mut row = row;
             row.enabled = new_enabled;
@@ -747,6 +782,9 @@ pub async fn toggle_service(
     }
 }
 
+// -----------------------------------------------------------------------
+// L4 Protection
+// -----------------------------------------------------------------------
 
 pub async fn get_l4_metrics(
     State(state): State<AppState>,
@@ -775,9 +813,15 @@ fn uuid_simple() -> String {
     format!("{:x}{:08x}", ts, rand_part as u32)
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// IP Reputation
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/ip-reputation`
 pub async fn get_ip_reputation(
     State(state): State<AppState>,
     Query(params): Query<TopParams>,
@@ -809,8 +853,11 @@ pub async fn get_ip_reputation(
     }))
 }
 
+// ---------------------------------------------------------------------------
+// Auto-Ban
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/auto-bans`
 pub async fn get_auto_bans(State(state): State<AppState>) -> Json<Value> {
     let bans = state.auto_ban.get_active_bans();
 
@@ -837,7 +884,7 @@ pub async fn get_auto_bans(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-/
+/// `GET /api/fortress/ip-lookup/{ip}`
 pub async fn get_ip_info(
     State(state): State<AppState>,
     Path(ip): Path<String>,
@@ -867,7 +914,7 @@ pub async fn get_ip_info(
     }
 }
 
-/
+/// `DELETE /api/fortress/auto-bans/{ip}`
 pub async fn unban_ip(
     State(state): State<AppState>,
     Path(ip): Path<String>,
@@ -886,8 +933,11 @@ pub async fn unban_ip(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Managed Rules
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/managed-rules`
 pub async fn get_managed_rules(State(state): State<AppState>) -> Json<Value> {
     let rules = state.managed_rules.get_rules();
 
@@ -903,7 +953,7 @@ pub async fn get_managed_rules(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "rules": rules_list }))
 }
 
-/
+/// `PUT /api/fortress/managed-rules/{id}`
 pub async fn toggle_managed_rule(
     State(state): State<AppState>,
     Path(id): Path<u32>,
@@ -918,8 +968,11 @@ pub async fn toggle_managed_rule(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Distributed Attack Detection
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/distributed-attacks`
 pub async fn get_distributed_attacks(State(state): State<AppState>) -> Json<Value> {
     let (total, unique_ips, new_ips, active) = state.distributed.get_stats();
     let last_attack = state.distributed.get_last_attack();
@@ -945,8 +998,11 @@ pub async fn get_distributed_attacks(State(state): State<AppState>) -> Json<Valu
     }))
 }
 
+// ---------------------------------------------------------------------------
+// Threat Summary
+// ---------------------------------------------------------------------------
 
-/
+/// `GET /api/fortress/threat-summary`
 pub async fn get_threat_summary(State(state): State<AppState>) -> Json<Value> {
     let snapshot = state.metrics.get_snapshot();
     let level = state.escalation.current_level();
@@ -973,6 +1029,9 @@ pub async fn get_threat_summary(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 fn aggregate_snapshots(
     snapshots: &[crate::analytics::collector::SecondSnapshot],
@@ -1011,6 +1070,7 @@ fn aggregate_snapshots(
         acc_passed += snap.passed;
     }
 
+    // Flush the final bucket.
     buckets.push(json!({
         "timestamp": bucket_start,
         "requests": acc_requests,
