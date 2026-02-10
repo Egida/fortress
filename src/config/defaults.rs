@@ -195,6 +195,8 @@ pub fn default_admin_bind() -> String {
 }
 
 pub fn default_api_key() -> String {
+    // INSECURE DEFAULT: Must be overridden in production config.
+    // Startup validation in main.rs will panic if this is left empty.
     String::new()
 }
 
@@ -304,6 +306,8 @@ pub fn default_cookie_max_age_secs() -> u64 {
 }
 
 pub fn default_hmac_secret() -> String {
+    // INSECURE DEFAULT: Must be overridden in production config.
+    // Startup validation in main.rs will panic if this is left empty.
     String::new()
 }
 

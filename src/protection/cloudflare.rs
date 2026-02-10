@@ -42,16 +42,17 @@ pub fn is_cloudflare_ip(ip: IpAddr) -> bool {
         }
         IpAddr::V6(v6) => {
             let octets = v6.octets();
-            // Check common Cloudflare IPv6 prefixes (first 4 bytes)
+            // Check Cloudflare IPv6 prefixes using full /32 (first 4 bytes)
             let first4 = [octets[0], octets[1], octets[2], octets[3]];
             matches!(
                 first4,
-                [0x24, 0x00, ..] | // 2400:cb00::/32
-                [0x26, 0x06, ..] | // 2606:4700::/32
-                [0x28, 0x03, ..] | // 2803:f800::/32
-                [0x24, 0x05, ..] | // 2405:b500::/32 and 2405:8100::/32
-                [0x2a, 0x06, ..] | // 2a06:98c0::/29
-                [0x2c, 0x0f, ..]   // 2c0f:f248::/32
+                [0x24, 0x00, 0xcb, 0x00] | // 2400:cb00::/32
+                [0x26, 0x06, 0x47, 0x00] | // 2606:4700::/32
+                [0x28, 0x03, 0xf8, 0x00] | // 2803:f800::/32
+                [0x24, 0x05, 0xb5, 0x00] | // 2405:b500::/32
+                [0x24, 0x05, 0x81, 0x00] | // 2405:8100::/32
+                [0x2a, 0x06, 0x98, 0xc0] | // 2a06:98c0::/29
+                [0x2c, 0x0f, 0xf2, 0x48]   // 2c0f:f248::/32
             )
         }
     }

@@ -131,10 +131,14 @@ pub fn ip_to_subnet(ip: IpAddr, mask_bits: u8) -> u32 {
             };
             ip_u32 & mask
         }
-        IpAddr::V6(_) => {
-            // For IPv6 we just return 0; real subnet handling for v6 would
-            // require larger key types.
-            0
+        IpAddr::V6(v6) => {
+            let segments = v6.segments();
+            // Use first 4 segments (/64 prefix) hashed to u32
+            let mut hash: u32 = 0;
+            for i in 0..4 {
+                hash = hash.wrapping_mul(31).wrapping_add(segments[i] as u32);
+            }
+            hash
         }
     }
 }

@@ -120,9 +120,9 @@ impl ChallengeSystem {
         // Reconstruct the challenge string
         let challenge = format!("{}:{}:{}", timestamp_str, random_hex, ip_hash);
 
-        // Verify HMAC signature
+        // Verify HMAC signature (constant-time comparison)
         let expected_signature = self.compute_signature(&challenge, nonce, "clearance");
-        if signature != expected_signature {
+        if !constant_time_eq(signature.as_bytes(), expected_signature.as_bytes()) {
             debug!("Invalid clearance cookie: signature mismatch");
             return false;
         }
@@ -195,8 +195,14 @@ impl ChallengeSystem {
     /// Verify a proof-of-work solution.
     ///
     /// Checks that SHA-256(challenge + ":" + nonce) has the required number
-    /// of leading zero bits.
-    pub fn verify_solution(&self, challenge: &str, nonce: &str) -> bool {
+    /// of leading zero bits based on the current protection level.
+    pub fn verify_solution(&self, challenge: &str, nonce: &str, level: &ProtectionLevel) -> bool {
+        let difficulty = match level {
+            ProtectionLevel::L0 | ProtectionLevel::L1 => self.pow_difficulty_l1 as u32,
+            ProtectionLevel::L2 => self.pow_difficulty_l2 as u32,
+            ProtectionLevel::L3 | ProtectionLevel::L4 => self.pow_difficulty_l3 as u32,
+        };
+
         let data = format!("{}:{}", challenge, nonce);
         let hash = Sha256::digest(data.as_bytes());
 
@@ -212,9 +218,8 @@ impl ChallengeSystem {
             }
         }
 
-        // We require at least 16 leading zero bits as minimum
-        // The actual difficulty check is done by the client
-        zeros >= 16
+        // Verify against the configured difficulty for this protection level
+        zeros >= difficulty
     }
 
     /// Generate a signed clearance cookie value for the given IP.
@@ -231,7 +236,7 @@ impl ChallengeSystem {
 
         let cookie_value = format!("{}:{}:{}", challenge, nonce, signature);
         format!(
-            "{}={}; Path=/; Max-Age={}; SameSite=Lax; HttpOnly",
+            "{}={}; Path=/; Max-Age={}; SameSite=Lax; HttpOnly; Secure",
             self.cookie_name,
             cookie_value,
             self.cookie_max_age.as_secs()
@@ -247,14 +252,20 @@ impl ChallengeSystem {
     /// timestamp is no older than 5 minutes.
     pub fn verify_nojs_token(&self, token: &str, sig: &str) -> bool {
         let expected_sig = self.compute_signature(token, "0", "nojs");
-        if sig != expected_sig {
+        if !constant_time_eq(sig.as_bytes(), expected_sig.as_bytes()) {
             return false;
         }
-        // Check timestamp freshness (5 minutes)
+        // Check timestamp freshness (5 minutes) and minimum age (3 seconds)
         if let Some(ts_str) = token.split(':').next() {
             if let Ok(ts) = ts_str.parse::<i64>() {
                 let now = chrono::Utc::now().timestamp();
-                if (now - ts).abs() > 300 {
+                let age = now - ts;
+                // Token must be at least 3 seconds old to prevent instant bypass
+                if age < 3 {
+                    debug!("NoJS token too fresh: age {}s < 3s minimum", age);
+                    return false;
+                }
+                if age.abs() > 300 {
                     return false;
                 }
             }
@@ -273,7 +284,9 @@ impl ChallengeSystem {
         false
     }
 
+    // ====================================================================
     // Private helpers
+    // ====================================================================
 
     /// Extract the clearance cookie value from a Cookie header string.
     fn extract_cookie<'a>(&self, cookies: &'a str) -> Option<&'a str> {
@@ -332,6 +345,18 @@ impl ChallengeSystem {
         let bytes: Vec<u8> = (0..len / 2).map(|_| rng.random()).collect();
         hex::encode(&bytes)
     }
+}
+
+/// Constant-time byte comparison to prevent timing attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
 }
 
 /// Inline hex encoding utility to avoid extra dependency.

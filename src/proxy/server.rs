@@ -243,11 +243,21 @@ async fn handle_tls_connection(
         debug!(client_ip = %peer_ip, ja3 = %hash, "JA3 fingerprint extracted");
     }
 
-    // 2. TLS handshake.
-    let tls_stream = tls_acceptor.accept(stream).await.map_err(|err| {
-        debug!(client_ip = %peer_ip, error = %err, "TLS handshake failed");
-        err
-    })?;
+    // 2. TLS handshake with timeout to prevent resource exhaustion.
+    let tls_stream = match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tls_acceptor.accept(stream),
+    ).await {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(err)) => {
+            debug!(client_ip = %peer_ip, error = %err, "TLS handshake failed");
+            return Err(err.into());
+        }
+        Err(_) => {
+            debug!(client_ip = %peer_ip, "TLS handshake timeout (10s)");
+            return Err("TLS handshake timeout".into());
+        }
+    };
 
     // Register the connection.
     let conn_id = connections.register(peer_ip, ja3_hash.clone());
@@ -322,9 +332,13 @@ async fn run_http_redirect(listener: TcpListener) {
             let mut total = 0usize;
 
             loop {
-                match stream.read(&mut buf[total..]).await {
-                    Ok(0) => return,
-                    Ok(n) => {
+                let read_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    stream.read(&mut buf[total..]),
+                ).await;
+                match read_result {
+                    Ok(Ok(0)) => return,
+                    Ok(Ok(n)) => {
                         total += n;
                         if total >= 4
                             && buf[..total]
@@ -337,7 +351,11 @@ async fn run_http_redirect(listener: TcpListener) {
                             break;
                         }
                     }
-                    Err(_) => return,
+                    Ok(Err(_)) => return,
+                    Err(_) => {
+                        debug!(client_ip = %peer_addr.ip(), "HTTP redirect read timeout");
+                        return;
+                    }
                 }
             }
 

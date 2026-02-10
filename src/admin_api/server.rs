@@ -3,7 +3,7 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{Any, AllowOrigin, CorsLayer};
 use tracing::info;
 
 use crate::admin_api::{auth, routes, websocket};
@@ -25,10 +25,14 @@ impl AdminApiServer {
         let state = self.state.clone();
         let api_key = state.api_key.clone();
 
-        // CORS: allow any origin on localhost for development dashboards,
-        // plus any explicit origin header for production use.
+        // CORS: restrict to localhost origins since admin API binds to 127.0.0.1:9090
         let cors = CorsLayer::new()
-            .allow_origin(Any)
+            .allow_origin(AllowOrigin::list([
+                "http://localhost:3100".parse().unwrap(),
+                "http://127.0.0.1:3100".parse().unwrap(),
+                "http://localhost:9090".parse().unwrap(),
+                "http://127.0.0.1:9090".parse().unwrap(),
+            ]))
             .allow_methods(Any)
             .allow_headers(Any);
 

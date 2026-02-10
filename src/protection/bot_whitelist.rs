@@ -161,25 +161,22 @@ impl BotWhitelist {
     }
 }
 
-/// Perform reverse DNS lookup using libc getnameinfo.
+/// Perform reverse DNS lookup using system dig command.
+/// This function uses blocking I/O and should be called from
+/// within a `tokio::task::spawn_blocking` context.
 fn dns_lookup_reverse(ip: &IpAddr) -> Option<String> {
     use std::net::SocketAddr;
 
-    let socket_addr = SocketAddr::new(*ip, 0);
+    let _socket_addr = SocketAddr::new(*ip, 0);
 
-    // Use std::net::ToSocketAddrs in reverse is not possible directly.
-    // We'll use the dns-lookup approach via libc.
-    // Since we can't add external crates easily, use a blocking DNS resolution
-    // by spawning a subprocess or using libc directly.
-    
-    // Simplest approach: try to resolve via system DNS
-    // We use the fact that gethostbyaddr equivalent can be done
-    // through a simple reverse lookup pattern.
-    
-    // Use std command for now (works on Linux)
+    // Use tokio::process::Command for non-blocking DNS lookup to avoid
+    // blocking the async runtime. Since this is called from a sync context,
+    // we wrap the caller in spawn_blocking instead.
     let output = std::process::Command::new("dig")
         .args(&[
             "+short",
+            "+time=3",
+            "+tries=1",
             "-x",
             &ip.to_string(),
         ])

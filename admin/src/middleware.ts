@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const AUTH_SECRET = process.env.AUTH_SECRET || 'fortress_default_secret';
+const AUTH_SECRET = process.env.AUTH_SECRET;
+if (!AUTH_SECRET) {
+    throw new Error('AUTH_SECRET environment variable is required');
+}
 const TOKEN_MAX_AGE_SECS = 60 * 60 * 24 * 7; // 7 days
 
 async function verifyToken(token: string): Promise<boolean> {
@@ -29,7 +32,16 @@ async function verifyToken(token: string): Promise<boolean> {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 
-  return hmac === expected;
+  return constantTimeEqual(hmac, expected);
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+    if (a.length !== b.length) return false;
+    let result = 0;
+    for (let i = 0; i < a.length; i++) {
+        result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    }
+    return result === 0;
 }
 
 export async function middleware(request: NextRequest) {

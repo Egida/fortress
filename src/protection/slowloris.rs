@@ -17,7 +17,12 @@ use tracing::debug;
 /// - HTTP headers not yet complete
 pub struct SlowlorisDetector {
     slow_connections: DashMap<IpAddr, SlowConnInfo>,
+    /// Count of slow connections per IP for threshold-based detection
+    slow_conn_count: DashMap<IpAddr, u32>,
 }
+
+/// Maximum number of concurrent slow connections allowed per IP before flagging
+const MAX_SLOW_CONNECTIONS_PER_IP: u32 = 5;
 
 /// Tracking information for a single connection.
 struct SlowConnInfo {
@@ -41,6 +46,7 @@ impl SlowlorisDetector {
     pub fn new() -> Self {
         Self {
             slow_connections: DashMap::new(),
+            slow_conn_count: DashMap::new(),
         }
     }
 
@@ -49,6 +55,8 @@ impl SlowlorisDetector {
     /// Called when a new TCP connection is accepted.
     pub fn track_connection(&self, ip: IpAddr) {
         let now = Instant::now();
+        // Increment the per-IP slow connection counter instead of overwriting
+        *self.slow_conn_count.entry(ip).or_insert(0) += 1;
         self.slow_connections.insert(
             ip,
             SlowConnInfo {
@@ -58,7 +66,8 @@ impl SlowlorisDetector {
                 last_activity: now,
             },
         );
-        debug!(ip = %ip, "Tracking new connection for slowloris detection");
+        debug!(ip = %ip, count = self.slow_conn_count.get(&ip).map(|v| *v).unwrap_or(0),
+               "Tracking new connection for slowloris detection");
     }
 
     /// Update the progress of a tracked connection.
@@ -82,6 +91,18 @@ impl SlowlorisDetector {
     /// Also checks for "slow body" attacks where headers are complete but
     /// body data trickles in very slowly.
     pub fn is_slowloris(&self, ip: &IpAddr) -> bool {
+        // Check if this IP has too many concurrent slow connections
+        if let Some(count) = self.slow_conn_count.get(ip) {
+            if *count >= MAX_SLOW_CONNECTIONS_PER_IP {
+                debug!(
+                    ip = %ip,
+                    count = *count,
+                    "Slowloris detected: too many concurrent slow connections from IP"
+                );
+                return true;
+            }
+        }
+
         let info = match self.slow_connections.get(ip) {
             Some(i) => i,
             None => return false,
@@ -149,16 +170,26 @@ impl SlowlorisDetector {
                     age_secs = age.as_secs(),
                     "Removing stale slowloris tracking entry"
                 );
+                // Decrement the per-IP counter when removing
+                if let Some(mut count) = self.slow_conn_count.get_mut(ip) {
+                    *count = count.saturating_sub(1);
+                }
                 return false;
             }
 
             // Remove completed connections (headers done and reasonable data)
             if info.header_complete && info.bytes_received > SLOWLORIS_MIN_BYTES {
+                if let Some(mut count) = self.slow_conn_count.get_mut(ip) {
+                    *count = count.saturating_sub(1);
+                }
                 return false;
             }
 
             true
         });
+
+        // Remove IPs with zero slow connection count
+        self.slow_conn_count.retain(|_, count| *count > 0);
     }
 
     /// Get the number of currently tracked connections.

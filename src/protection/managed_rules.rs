@@ -126,9 +126,9 @@ impl ManagedRulesEngine {
 
         // Rule 3: Backup files
         if self.is_enabled(3) {
-            if path.ends_with(".bak") || path.ends_with(".old") || path.ends_with(".swp")
+            if (path.ends_with(".bak") || path.ends_with(".old") || path.ends_with(".swp")
                 || path.ends_with(".sql") || path.ends_with(".sql.gz")
-                || path.ends_with(".tar.gz") || path.ends_with(".zip")
+                || path.ends_with(".tar.gz") || path.ends_with(".zip"))
                 && (path.contains("backup") || path.contains("dump") || path.contains("db")) {
                 return Some(ManagedRuleResult {
                     matched_rule: Some("backup_files".to_string()),

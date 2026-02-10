@@ -491,32 +491,28 @@ impl ProtectionPipeline {
             }
         }
 
-        // Subnet match (supports /24 for IPv4)
-        if let IpAddr::V4(v4) = ip {
-            let octets = v4.octets();
-            for subnet_str in &settings.protection.whitelisted_subnets {
-                if let Some(prefix) = subnet_str.strip_suffix("/24") {
-                    let parts: Vec<&str> = prefix.split('.').collect();
-                    if parts.len() >= 3 {
-                        let subnet_prefix = format!("{}.{}.{}", parts[0], parts[1], parts[2]);
-                        let ip_prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
-                        if subnet_prefix == ip_prefix {
-                            return true;
-                        }
-                    }
-                } else if let Some(prefix) = subnet_str.strip_suffix("/16") {
-                    let parts: Vec<&str> = prefix.split('.').collect();
-                    if parts.len() >= 2 {
-                        let subnet_prefix = format!("{}.{}", parts[0], parts[1]);
-                        let ip_prefix = format!("{}.{}", octets[0], octets[1]);
-                        if subnet_prefix == ip_prefix {
-                            return true;
-                        }
-                    }
-                }
+        // Subnet match with proper CIDR parsing for any prefix length
+        for subnet_str in &settings.protection.whitelisted_subnets {
+            if ip_in_cidr(ip, subnet_str) {
+                return true;
             }
         }
 
         false
     }
+}
+
+/// Check if an IP address falls within a CIDR range.
+/// Supports any valid IPv4 prefix length (0-32).
+fn ip_in_cidr(ip: &IpAddr, cidr: &str) -> bool {
+    if let Some((network_str, prefix_len_str)) = cidr.rsplit_once('/') {
+        if let (Ok(network), Ok(prefix_len)) = (network_str.parse::<std::net::Ipv4Addr>(), prefix_len_str.parse::<u32>()) {
+            if let IpAddr::V4(ipv4) = ip {
+                if prefix_len > 32 { return false; }
+                let mask = if prefix_len == 0 { 0u32 } else { !0u32 << (32 - prefix_len) };
+                return (u32::from(*ipv4) & mask) == (u32::from(network) & mask);
+            }
+        }
+    }
+    false
 }

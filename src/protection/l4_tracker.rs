@@ -100,10 +100,15 @@ impl L4Tracker {
     /// Unregister that a connection from `ip` has closed.
     pub fn unregister_connection(&self, ip: IpAddr) {
         if let Some(state) = self.ip_states.get(&ip) {
-            let prev = state.concurrent.fetch_sub(1, Ordering::Relaxed);
-            // Guard against underflow (shouldn't happen, but be safe).
-            if prev == 0 {
-                state.concurrent.store(0, Ordering::Relaxed);
+            // Use compare_exchange loop to prevent atomic underflow
+            loop {
+                let current = state.concurrent.load(Ordering::Relaxed);
+                if current == 0 {
+                    break;
+                }
+                if state.concurrent.compare_exchange(current, current - 1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                    break;
+                }
             }
         }
     }

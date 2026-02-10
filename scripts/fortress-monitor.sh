@@ -1,7 +1,9 @@
 #!/bin/bash
+# ============================================================================
 # FORTRESS - Kernel-Level DDoS Auto-Detection Monitor
 # Monitors iptables counters, connection states, and network anomalies
 # Automatically escalates/de-escalates Fortress protection level
+# ============================================================================
 
 CONFIG_FILE="/etc/fortress/fortress.conf"
 LOG_FILE="/var/log/fortress/monitor.log"
@@ -25,7 +27,9 @@ COOLDOWN_SECS=120
 LAST_ESCALATION=0
 CURRENT_MODE="Normal"
 
+# ============================================================================
 # Logging
+# ============================================================================
 log() {
     local level="$1"
     shift
@@ -36,7 +40,9 @@ log_alert() { log "ALERT" "$@"; }
 log_info()  { log "INFO"  "$@"; }
 log_warn()  { log "WARN"  "$@"; }
 
+# ============================================================================
 # API Helpers
+# ============================================================================
 set_protection_level() {
     local level="$1"
     local response
@@ -71,7 +77,9 @@ get_current_level() {
     fi
 }
 
+# ============================================================================
 # Detection Functions
+# ============================================================================
 
 # Count SYN_RECV connections (indicator of SYN flood)
 get_syn_recv_count() {
@@ -159,7 +167,9 @@ cleanup_expired_bans() {
     done
 }
 
+# ============================================================================
 # Main Detection Logic
+# ============================================================================
 analyze_and_respond() {
     local now=$(date +%s)
     local syn_recv=$(get_syn_recv_count)
@@ -204,7 +214,9 @@ analyze_and_respond() {
     fi
 }
 
+# ============================================================================
 # Multi-IP Scanner (detect distributed attacks at kernel level)
+# ============================================================================
 scan_distributed_abuse() {
     # Find IPs with more than threshold connections
     ss -tn 2>/dev/null | awk 'NR>1{print $5}' | cut -d: -f1 | sort | uniq -c | sort -rn | while read -r count ip; do
@@ -214,7 +226,9 @@ scan_distributed_abuse() {
     done
 }
 
+# ============================================================================
 # Main Loop
+# ============================================================================
 main() {
     # PID file
     echo $$ > "$PID_FILE"
@@ -243,7 +257,9 @@ main() {
     done
 }
 
+# ============================================================================
 # Signal Handlers
+# ============================================================================
 cleanup() {
     log_info "=== Fortress Monitor stopped ==="
     rm -f "$PID_FILE"
@@ -252,7 +268,9 @@ cleanup() {
 
 trap cleanup SIGTERM SIGINT SIGHUP
 
+# ============================================================================
 # Entry Point
+# ============================================================================
 case "${1:-}" in
     start)
         if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then

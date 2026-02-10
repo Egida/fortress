@@ -149,6 +149,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Config loaded from {}", config_path);
 
     // ---------------------------------------------------------------
+    // 2.1 Validate critical security settings
+    // ---------------------------------------------------------------
+    if settings.challenge.hmac_secret.is_empty() {
+        panic!("CRITICAL: challenge.hmac_secret is empty. Set a random secret in the config file to prevent token forgery.");
+    }
+    if settings.admin_api.api_key.is_empty() {
+        panic!("CRITICAL: admin_api.api_key is empty. Set a strong API key in the config file to protect the admin interface.");
+    }
+
+    // ---------------------------------------------------------------
     // 3. Storage
     // ---------------------------------------------------------------
     let sqlite = Arc::new(
@@ -423,6 +433,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
     tokio::signal::ctrl_c().await?;
     info!("Shutting down Fortress...");
+
+    // Give tasks time to finish gracefully before aborting.
+    info!("Shutting down gracefully, waiting 5 seconds...");
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     // Cancel background tasks.
     proxy_handle.abort();

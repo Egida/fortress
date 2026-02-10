@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 use crate::analytics::collector::MetricsCollector;
 use crate::config::settings::Settings;
 use crate::models::request::RequestContext;
-use crate::models::threat::ThreatAction;
+use crate::models::threat::{ThreatAction, ProtectionLevel};
 use crate::protection::challenge::ChallengeSystem;
 use crate::protection::pipeline::ProtectionPipeline;
 use crate::proxy::service_router::ServiceRouter;
@@ -172,9 +172,23 @@ impl HttpHandler {
             })
             .collect();
 
-        // CORS preflight requests bypass protection
+        // CORS preflight requests: still run blocklist and rate limit checks,
+        // but skip the full challenge pipeline to avoid breaking preflight flow.
         if method == "OPTIONS" {
-            debug!(client_ip = %real_ip, path = %path, "CORS preflight - bypassing protection");
+            // Check if IP is blocked
+            if let Some(_entry) = self.pipeline.memory.is_blocked(&real_ip) {
+                debug!(client_ip = %real_ip, "OPTIONS request blocked by IP blocklist");
+                return forbidden();
+            }
+            if self.pipeline.blocklist.check_ip(&real_ip).is_some() {
+                debug!(client_ip = %real_ip, "OPTIONS request blocked by blocklist");
+                return forbidden();
+            }
+            if let Some(reason) = self.pipeline.auto_ban.is_banned(&real_ip) {
+                debug!(client_ip = %real_ip, reason = %reason, "OPTIONS request blocked by auto-ban");
+                return forbidden();
+            }
+            debug!(client_ip = %real_ip, path = %path, "CORS preflight - passed security checks");
             return self.forward_to_backend(
                 &method,
                 &path,
@@ -387,8 +401,9 @@ impl HttpHandler {
             }
         };
 
-        // Verify the PoW solution
-        if !self.challenge.verify_solution(&challenge, &nonce) {
+        // Verify the PoW solution against the current protection level's difficulty
+        let protection_level = self.pipeline.escalation.current_level();
+        if !self.challenge.verify_solution(&challenge, &nonce, &protection_level) {
             warn!(client_ip = %client_ip, "Challenge verification: invalid PoW solution");
             return Response::builder()
                 .status(StatusCode::FORBIDDEN)

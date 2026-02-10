@@ -1,5 +1,7 @@
+// ============================================================================
 // FORTRESS - Core Constants & Utility Functions
 // Classification: INTERNAL USE ONLY
+// ============================================================================
 
 // ---------------------------------------------------------------------------
 // Protection Level Definitions (DEFCON-style threat posture)
